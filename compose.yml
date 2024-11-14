@@ -33,7 +33,7 @@ services:
       - conf:/app/nginx/conf.d
       - certs:/app/nginx/certs
       - scripts:/app/scripts
-      - ./web-manager/logs:/app/logs
+      - ./logs:/app/logs
     restart: unless-stopped
 
 volumes:

@@ -41,12 +41,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract Docker metadata
-        id: meta
+      - name: Extract Docker metadata for WEB MANAGER
+        id: meta-web-manager
         uses: docker/metadata-action@96383f45573cb7f253c731d3b3ab81c87ef81934
         with:
           images: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-web-manager
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=tag
+
+      - name: Extract Docker metadata for REVERSE PROXY
+        id: meta-reverse-proxy
+        uses: docker/metadata-action@96383f45573cb7f253c731d3b3ab81c87ef81934
+        with:
+          images: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-reverse-proxy
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
@@ -59,8 +68,8 @@ jobs:
           context: ./web-manager
           file: ./web-manager/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta-web-manager.outputs.tags }}
+          labels: ${{ steps.meta-web-manager.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -71,21 +80,21 @@ jobs:
           context: ./reverse-proxy
           file: ./reverse-proxy/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta-reverse-proxy.outputs.tags }}
+          labels: ${{ steps.meta-reverse-proxy.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Sign the published WEB MANAGER Docker image
         if: ${{ github.event_name != 'pull_request' }}
         env:
-          TAGS: ${{ steps.meta.outputs.tags }}
+          TAGS: ${{ steps.meta-web-manager.outputs.tags }}
           DIGEST: ${{ steps.build-and-push-web-manager.outputs.digest }}
         run: echo "${TAGS}" | xargs -I {} cosign sign --yes {}@${DIGEST}
 
       - name: Sign the published REVERSE PROXY Docker image
         if: ${{ github.event_name != 'pull_request' }}
         env:
-          TAGS: ${{ steps.meta.outputs.tags }}
+          TAGS: ${{ steps.meta-reverse-proxy.outputs.tags }}
           DIGEST: ${{ steps.build-and-push-reverse-proxy.outputs.digest }}
         run: echo "${TAGS}" | xargs -I {} cosign sign --yes {}@${DIGEST}

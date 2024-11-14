@@ -1,0 +1,43 @@
+services:
+  reverse-proxy:
+    container_name: reverse-proxy
+    build:
+      context: ./reverse-proxy
+      dockerfile: Dockerfile
+    ports:
+      - 80:80
+      - 443:443
+    volumes:
+      - logs:/var/log/nginx
+      - conf:/etc/nginx/conf.d
+      - certs:/etc/nginx/certs
+      - scripts:/opt/scripts
+    restart: unless-stopped
+
+  web-manager:
+    container_name: web-manager
+    build:
+      context: ./web-manager
+      dockerfile: Dockerfile
+    environment:
+      - SSL_COUNTRY=FR
+      - SSL_STATE=France
+      - SSL_CITY=Noisy-le-Grand
+      - SSL_ORGANIZATION_GLOBAL=ESIEE Paris
+      - SSL_ORGANIZATION_UNIT=Club*Nix
+      - SSL_DAYS=365
+    ports:
+      - 5000:5000
+    volumes:
+      - logs:/app/nginx/logs
+      - conf:/app/nginx/conf.d
+      - certs:/app/nginx/certs
+      - scripts:/app/scripts
+      - ./web-manager/logs:/app/logs
+    restart: unless-stopped
+
+volumes:
+  logs:
+  conf:
+  certs:
+  scripts:

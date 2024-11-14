@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Reverse Proxy Manager{% endblock %}
+{% block content %}
+<div class="starter-template text-center py-5 px-3">
+    <br>
+
+        {% if message %}
+        <div class="{% if success %}text-success{% else %}text-danger{% endif %}">
+            <p>{{ message }}</p>
+        </div>
+        {% endif %}
+        {% if error %}
+        <div class="text-danger">
+            <p>{{ error }}</p>
+        </div>
+        {% endif %}
+
+        <div class="form">
+            <form method="POST" enctype="multipart/form-data">
+                <fieldset>
+                    <legend>Create service</legend>
+                    <div class="input-group">
+                        <span class="input-group addon">Domain</span>
+                        <label for="domain"></label>
+                        <input type="text" id="domain" name="domain" placeholder="example.com" required>
+                    </div>
+                    <div class="input-group">
+                        <span class="input-group addon">Server</span>
+                        <label for="server"></label>
+                        <input type="text" id="server" name="server" placeholder="127.0.0.1:5000" required>
+                    </div>
+                    <div class="input-group">
+                        <span class="input-group addon">Description</span>
+                        <label for="description"></label>
+                        <input type="text" id="description" name="description" placeholder="My service">
+                    </div>
+                    <div class="input-group">
+                        <span class="input-group addon">Allow Origin</span>
+                        <label for="allow_origin"></label>
+                        <input type="text" id="allow_origin" name="allow_origin" placeholder="*">
+                    </div>
+                    <div class="input-group">
+                        <span class="input-group addon">Service Type</span>
+                        <label for="service_type"></label>
+                        <select id="service_type" name="service_type">
+                            <option value="http">HTTP</option>
+                            <option value="https">HTTPS</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <span class="input-group addon">Certificate</span>
+                        <label for="cert"></label>
+                        <input class="input-group file" type="file" id="cert" name="cert" accept=".crt">
+                        <label for="cert_text"></label>
+                        <textarea id="cert_text" name="cert_text" placeholder="Or paste your certificate"></textarea>
+                    </div>
+                    <div class="input-group">
+                        <span class="input-group addon">Key</span>
+                        <label for="key"></label>
+                        <input class="input-group file" type="file" id="key" name="key" accept=".key">
+                        <label for="key_text"></label>
+                        <textarea id="key_text" name="key_text" placeholder="Or paste your key"></textarea>
+                    </div>
+
+                    <div class="input-group">
+                        <button type="submit" class="btn btn-primary mb-3">Submit</button>
+                    </div>
+                </fieldset>
+            </form>
+        </div>
+    <br>
+</div>
+{% endblock %}

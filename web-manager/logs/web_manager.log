@@ -1,0 +1,24 @@
+2024-11-13 22:11:29,077 - web_manager - ERROR - Failed to generate SSL certificate for test.com: Command '['openssl', 'req', '-new', '-newkey', 'rsa:4096', '-sha256', '-days', '3650', '-nodes', '-x509', '-keyout', '/app/nginx/certs/test.com.key', '-out', '/app/nginx/certs/test.com.crt', '-subj', '/C="US"/ST="California"/L="San Francisco"/O="My Organization"/OU="My Department"/CN=test.com', '-config', '/app/nginx/certs/test.com.ext.cnf']' returned non-zero exit status 1.
+2024-11-13 22:11:29,077 - web_manager - INFO - SSL certificate for test.com generated
+2024-11-13 22:11:29,077 - web_manager - INFO - Configuration test.com created
+2024-11-13 22:11:30,078 - web_manager - ERROR - Configuration check failed: nginx: [emerg] cannot load certificate "/etc/nginx/certs/test.com.crt": BIO_new_file() failed (SSL: error:80000002:system library::No such file or directory:calling fopen(/etc/nginx/certs/test.com.crt, r) error:10000080:BIO routines::no such file)
+nginx: configuration file /etc/nginx/nginx.conf test failed
+2024-11-13 22:13:46,842 - web_manager - ERROR - Failed to generate SSL certificate for test.com: Command '['openssl', 'req', '-new', '-newkey', 'rsa:4096', '-sha256', '-days', '3650', '-nodes', '-x509', '-keyout', '/app/nginx/certs/test.com.key', '-out', '/app/nginx/certs/test.com.crt', '-subj', '/C="US"/ST="California"/L="San Francisco"/O="My Organization"/OU="My Department"/CN=test.com', '-config', '/app/nginx/certs/test.com.ext.cnf']' returned non-zero exit status 1.
+2024-11-13 22:13:46,842 - web_manager - INFO - SSL certificate for test.com generated
+2024-11-13 22:13:46,842 - web_manager - INFO - Configuration test.com created
+2024-11-13 22:13:47,842 - web_manager - ERROR - Configuration check failed: nginx: [emerg] cannot load certificate "/etc/nginx/certs/test.com.crt": BIO_new_file() failed (SSL: error:80000002:system library::No such file or directory:calling fopen(/etc/nginx/certs/test.com.crt, r) error:10000080:BIO routines::no such file)
+nginx: configuration file /etc/nginx/nginx.conf test failed
+2024-11-14 21:04:55,839 - web_manager - ERROR - {'COUNTRY': '"US"', 'STATE': '"California"', 'LOCATION': '"San Francisco"', 'ORGANIZATION-GLOBAL': '"My Organization"', 'ORGANIZATION-UNIT': '"My Department"', 'DAYS': '3650'}
+2024-11-14 21:04:56,486 - web_manager - ERROR - Failed to generate SSL certificate for test.com: Command '['openssl', 'req', '-new', '-newkey', 'rsa:4096', '-sha256', '-days', '3650', '-nodes', '-x509', '-keyout', '/app/nginx/certs/test.com.key', '-out', '/app/nginx/certs/test.com.crt', '-subj', '/C="US"/ST="California"/L="San Francisco"/O="My Organization"/OU="My Department"/CN=test.com', '-config', '/app/nginx/certs/test.com.ext.cnf']' returned non-zero exit status 1.
+2024-11-14 21:04:56,487 - web_manager - INFO - SSL certificate for test.com generated
+2024-11-14 21:04:56,487 - web_manager - INFO - Configuration test.com created
+2024-11-14 21:04:57,487 - web_manager - ERROR - Configuration check failed: nginx: [emerg] cannot load certificate "/etc/nginx/certs/test.com.crt": BIO_new_file() failed (SSL: error:80000002:system library::No such file or directory:calling fopen(/etc/nginx/certs/test.com.crt, r) error:10000080:BIO routines::no such file)
+nginx: configuration file /etc/nginx/nginx.conf test failed
+2024-11-14 21:09:24,063 - web_manager - ERROR - {'COUNTRY': 'US', 'STATE': 'California', 'LOCATION': 'San Francisco', 'ORGANIZATION-GLOBAL': 'My Organization', 'ORGANIZATION-UNIT': 'My Department', 'DAYS': '3650'}
+2024-11-14 21:09:24,994 - web_manager - INFO - SSL certificate for test.com generated
+2024-11-14 21:09:24,994 - web_manager - INFO - Configuration test.com created
+2024-11-14 21:09:25,995 - web_manager - INFO - Reloading Nginx
+2024-11-14 21:10:16,721 - web_manager - ERROR - {'COUNTRY': 'FR', 'STATE': 'France', 'LOCATION': 'Noisy-le-Grand', 'ORGANIZATION-GLOBAL': 'ESIEE Paris', 'ORGANIZATION-UNIT': 'Club*Nix', 'DAYS': '365'}
+2024-11-14 21:10:17,463 - web_manager - INFO - SSL certificate for test.fr generated
+2024-11-14 21:10:17,463 - web_manager - INFO - Configuration test.fr created
+2024-11-14 21:10:18,464 - web_manager - INFO - Reloading Nginx

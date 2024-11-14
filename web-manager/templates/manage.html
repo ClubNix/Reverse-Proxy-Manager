@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}Reverse Proxy Manager{% endblock %}
+{% block content %}
+<div class="starter-template text-center py-5 px-3">
+    <h1>Manage services</h1>
+    <br>
+
+    {% if message %}
+    <div class="{% if success %}text-success{% else %}text-danger{% endif %}">
+        <p>{{ message }}</p>
+    </div>
+    {% endif %}
+    {% if error %}
+    <div class="text-danger">
+        <p>{{ error }}</p>
+    </div>
+    {% endif %}
+
+        <form method="POST" class="row g-3 center-form">
+            <div class="col-auto center-form">
+                <label for="conf" class="visually-hidden">Configuration</label>
+                <select id="conf" name="conf" class="form-control">
+                    <option selected>Choose...</option>
+                    {% for conf in conf_list %}
+                    <option value="{{ conf }}">{{ conf }}</option>
+                    {% endfor %}
+                </select>
+                <button type="submit" name="action" value="view" class="btn btn-primary mb-3">View</button>
+                <button type="submit" name="action" value="delete" class="btn btn-primary mb-3">Delete</button>
+                <button type="submit" name="action" value="edit" class="btn btn-primary mb-3">Edit</button>
+                <button type="submit" name="action" value="logs" class="btn btn-primary mb-3">Logs</button>
+            </div>
+        </form>
+
+        {% if conf_infos %}
+        <div class="infos">
+            <fieldset>
+                <legend>Global infos</legend>
+
+                <div>
+                    <p><strong>Name:</strong> {{ conf_infos.name }}</p>
+                    <p><strong>Server Name:</strong> {{ conf_infos.server_name }}</p>
+                    <p><strong>Server:</strong> {{ conf_infos.server }}</p>
+                </div>
+            </fieldset>
+            <br>
+            <fieldset>
+                <legend>Certificate infos</legend>
+
+                <div>
+                    <p><strong>Subject:</strong> {{ conf_infos.certificate.subject }}</p>
+                    <p><strong>Issuer:</strong> {{ conf_infos.certificate.issuer }}</p>
+                    <p><strong>Serial Number:</strong> {{ conf_infos.certificate.serial_number }}</p>
+                    <p><strong>Not Valid Before:</strong> {{ conf_infos.certificate.not_valid_before }}</p>
+                    <p><strong>Not Valid After:</strong> {{ conf_infos.certificate.not_valid_after }}</p>
+                </div>
+            </fieldset>
+        </div>
+        {% endif %}
+
+        {% if conf %}
+        <div>
+            <pre class="conf">{{ conf }}</pre>
+        </div>
+        {% endif %}
+
+        {% if conf_edit %}
+        <div class="form">
+            <form method="POST" enctype="multipart/form-data">
+                <fieldset>
+                    <legend>Edit a service</legend>
+                    <div class="input-group">
+                        <span class="input-group addon conf-edit">New configuration</span>
+                        <label for="new_conf"></label>
+                        <textarea id="new_conf" name="new_conf" class="conf-textarea">{{ conf_edit }}</textarea>
+                    </div>
+                    <div class="input-group">
+                        <span class="input-group addon">Certificate</span>
+                        <label for="cert"></label>
+                        <input class="input-group file" type="file" id="cert" name="cert" accept=".crt">
+                        <label for="cert_text"></label>
+                        <textarea id="cert_text" name="cert_text" placeholder="Or paste your certificate"></textarea>
+                    </div>
+                    <div class="input-group">
+                        <span class="input-group addon">Key</span>
+                        <label for="key"></label>
+                        <input class="input-group file" type="file" id="key" name="key" accept=".key">
+                        <label for="key_text"></label>
+                        <textarea id="key_text" name="key_text" placeholder="Or paste your key"></textarea>
+                    </div>
+
+                    <div class="text-main">
+                        <input type="checkbox" id="renew" name="renew" value="renew">
+                        <label for="renew">Renew certificate</label>
+                    </div>
+
+                    <div class="input-group">
+                        <input type="hidden" name="conf_name" value="{{ conf_name }}"><br>
+                        <button type="submit" class="btn btn-primary mb-3">Submit</button>
+                    </div>
+                </fieldset>
+            </form>
+        </div>
+        {% endif %}
+    <br>
+</div>
+{% endblock %}

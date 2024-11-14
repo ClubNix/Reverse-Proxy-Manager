@@ -1,0 +1,30 @@
+.infos fieldset {
+    border: 2px solid var(--fieldset-border-color);
+    border-radius: 5px;
+    padding: 1rem;
+    margin: 2rem;
+}
+.infos fieldset > legend {
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: var(--text-color);
+    float: none !important;
+    width: auto;
+    padding: 0 10px;
+}
+.infos fieldset > div {
+    text-align: left;
+    padding-left: 3rem;
+}
+
+.input-group .conf-edit {
+    width: 100% !important;
+    border-bottom-left-radius: 0 !important;
+    border-top-right-radius: 5px !important;
+}
+.conf-textarea {
+    margin-left: unset !important;
+    border-top-right-radius: 0 !important;
+    border-bottom-left-radius: 5px !important;
+    min-height: 20rem;
+}

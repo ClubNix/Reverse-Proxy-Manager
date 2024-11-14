@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Reverse Proxy Manager{% endblock %}
+{% block content %}
+<div class="starter-template text-center py-5 px-3">
+    <h1>Reverse Proxy Manager</h1>
+    <br>
+    <div>
+        <button type="button" class="btn btn-transparent">
+            <a href="{{ url_for('manager.manage') }}">MANAGE</a>
+        </button>
+        <button type="button" class="btn btn-transparent">
+            <a href="{{ url_for('manager.create') }}">CREATE</a>
+        </button>
+        <button type="button" class="btn btn-transparent">
+            <a href="{{ url_for('manager.backup') }}">BACKUP</a>
+        </button>
+    </div>
+    <br>
+</div>
+{% endblock %}

@@ -8,9 +8,9 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
-  #  WEB_MANAGER_IMAGE_NAME: rpm-web
-  #  REVERSE_PROXY_IMAGE_NAME: rpm-rp
+  #  IMAGE_NAME: ${{ github.repository }}
+  WEB_MANAGER_IMAGE_NAME: ClubNix/rpm-web
+  REVERSE_PROXY_IMAGE_NAME: ClubNix/rpm-rp
 
 jobs:
   build:
@@ -46,7 +46,7 @@ jobs:
         uses: docker/metadata-action@96383f45573cb7f253c731d3b3ab81c87ef81934
         with:
           images: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-web-manager
+            ${{ env.REGISTRY }}/${{ env.WEB_MANAGER_IMAGE_NAME }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=tag
@@ -56,7 +56,7 @@ jobs:
         uses: docker/metadata-action@96383f45573cb7f253c731d3b3ab81c87ef81934
         with:
           images: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-reverse-proxy
+            ${{ env.REGISTRY }}/${{ env.REVERSE_PROXY_IMAGE_NAME }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=tag

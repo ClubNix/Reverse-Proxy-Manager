@@ -1,7 +1,9 @@
 services:
   reverse-proxy:
     container_name: reverse-proxy
-    image: ghcr.io/clubnix/rpm-rp:latest
+    build:
+      context: ./reverse-proxy
+      dockerfile: Dockerfile
     ports:
       - 80:80
       - 443:443
@@ -14,7 +16,9 @@ services:
 
   web-manager:
     container_name: web-manager
-    image: ghcr.io/clubnix/rpm-web:latest
+    build:
+      context: ./web-manager
+      dockerfile: Dockerfile
     environment:
       - SSL_COUNTRY=FR
       - SSL_STATE=France

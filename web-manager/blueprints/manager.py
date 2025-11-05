@@ -48,6 +48,11 @@ class ReverseProxyManager:
         self.app_scripts_path = '/app/scripts'
         self.app_nginx_path = '/app/nginx'
         self.ip_pattern = r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$'
+        self.addr_with_path_pattern = re.compile(
+            r'^(?P<host>(?:\d{1,3}\.){3}\d{1,3})'
+            r'(?::(?P<port>\d{1,5}))?'
+            r'(?P<path>/.*)?$'
+        )
         self.ssl_conf = {
             'COUNTRY': os.getenv('SSL_COUNTRY', 'US'),
             'STATE': os.getenv('SSL_STATE', 'California'),
@@ -77,18 +82,27 @@ class ReverseProxyManager:
                 return True, 'OK'
 
     def address_check(self, server: str) -> bool:
-        if ':' in server:
-            host, port = server.split(':')
+        m = self.addr_with_path_pattern.match(server.strip())
+        if not m:
+            return False
+
+        host = m.group('host')
+        port = m.group('port')
+        path = m.group('path')
+
+        if not re.match(self.ip_pattern, host):
+            return False
+
+        if port is not None:
             try:
                 if not 1 <= int(port) <= 65535:
                     return False
             except ValueError:
                 return False
-        else:
-            host = server
-        ip_pattern = self.ip_pattern
-        if not re.match(ip_pattern, host):
+
+        if path is not None and not path.startswith('/'):
             return False
+
         return True
 
     def get_conf_list(self) -> list:

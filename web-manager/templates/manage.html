@@ -1,107 +1,263 @@
 {% extends "base.html" %}
-{% block title %}Reverse Proxy Manager{% endblock %}
+{% block title %}Manage &mdash; Reverse Proxy Manager{% endblock %}
 {% block content %}
-<div class="starter-template text-center py-5 px-3">
-    <h1>Manage services</h1>
-    <br>
-
-    {% if message %}
-    <div class="{% if success %}text-success{% else %}text-danger{% endif %}">
-        <p>{{ message }}</p>
-    </div>
-    {% endif %}
-    {% if error %}
-    <div class="text-danger">
-        <p>{{ error }}</p>
-    </div>
-    {% endif %}
-
-        <form method="POST" class="row g-3 center-form">
-            <div class="col-auto center-form">
-                <label for="conf" class="visually-hidden">Configuration</label>
-                <select id="conf" name="conf" class="form-control">
-                    <option selected>Choose...</option>
-                    {% for conf in conf_list %}
-                    <option value="{{ conf }}">{{ conf }}</option>
-                    {% endfor %}
-                </select>
-                <button type="submit" name="action" value="view" class="btn btn-primary mb-3">View</button>
-                <button type="submit" name="action" value="delete" class="btn btn-primary mb-3">Delete</button>
-                <button type="submit" name="action" value="edit" class="btn btn-primary mb-3">Edit</button>
-                <button type="submit" name="action" value="logs" class="btn btn-primary mb-3">Logs</button>
-            </div>
-        </form>
-
-        {% if conf_infos %}
-        <div class="infos">
-            <fieldset>
-                <legend>Global infos</legend>
-
-                <div>
-                    <p><strong>Name:</strong> {{ conf_infos.name }}</p>
-                    <p><strong>Server Name:</strong> {{ conf_infos.server_name }}</p>
-                    <p><strong>Server:</strong> {{ conf_infos.server }}</p>
-                </div>
-            </fieldset>
-            <br>
-            <fieldset>
-                <legend>Certificate infos</legend>
-
-                <div>
-                    <p><strong>Subject:</strong> {{ conf_infos.certificate.subject }}</p>
-                    <p><strong>Issuer:</strong> {{ conf_infos.certificate.issuer }}</p>
-                    <p><strong>Serial Number:</strong> {{ conf_infos.certificate.serial_number }}</p>
-                    <p><strong>Not Valid Before:</strong> {{ conf_infos.certificate.not_valid_before }}</p>
-                    <p><strong>Not Valid After:</strong> {{ conf_infos.certificate.not_valid_after }}</p>
-                </div>
-            </fieldset>
-        </div>
-        {% endif %}
-
-        {% if conf %}
-        <div>
-            <pre class="conf">{{ conf }}</pre>
-        </div>
-        {% endif %}
-
-        {% if conf_edit %}
-        <div class="form">
-            <form method="POST" enctype="multipart/form-data">
-                <fieldset>
-                    <legend>Edit a service</legend>
-                    <div class="input-group">
-                        <span class="input-group addon conf-edit">New configuration</span>
-                        <label for="new_conf"></label>
-                        <textarea id="new_conf" name="new_conf" class="conf-textarea">{{ conf_edit }}</textarea>
-                    </div>
-                    <div class="input-group">
-                        <span class="input-group addon">Certificate</span>
-                        <label for="cert"></label>
-                        <input class="input-group file" type="file" id="cert" name="cert" accept=".crt">
-                        <label for="cert_text"></label>
-                        <textarea id="cert_text" name="cert_text" placeholder="Or paste your certificate"></textarea>
-                    </div>
-                    <div class="input-group">
-                        <span class="input-group addon">Key</span>
-                        <label for="key"></label>
-                        <input class="input-group file" type="file" id="key" name="key" accept=".key">
-                        <label for="key_text"></label>
-                        <textarea id="key_text" name="key_text" placeholder="Or paste your key"></textarea>
-                    </div>
-
-                    <div class="text-main">
-                        <input type="checkbox" id="renew" name="renew" value="renew">
-                        <label for="renew">Renew certificate</label>
-                    </div>
-
-                    <div class="input-group">
-                        <input type="hidden" name="conf_name" value="{{ conf_name }}"><br>
-                        <button type="submit" class="btn btn-primary mb-3">Submit</button>
-                    </div>
-                </fieldset>
-            </form>
-        </div>
-        {% endif %}
-    <br>
+<div class="page-header">
+    <h2 class="page-title"><i class="bi bi-sliders"></i> Manage services</h2>
+    <p class="page-subtitle">{{ conf_list | length }} configuration{{ 's' if conf_list | length != 1 else '' }} registered.</p>
 </div>
+
+{% if message %}
+<div class="alert-modern {% if success %}success{% else %}error{% endif %}">
+    <i class="bi bi-{% if success %}check-circle{% else %}exclamation-triangle{% endif %}"></i>
+    {{ message }}
+</div>
+{% endif %}
+{% if error %}
+<div class="alert-modern error">
+    <i class="bi bi-exclamation-triangle"></i>
+    {{ error }}
+</div>
+{% endif %}
+
+{% if conf_list %}
+<div class="search-bar">
+    <i class="bi bi-search"></i>
+    <input type="text" id="conf-search" placeholder="Filter configurations…" autocomplete="off" spellcheck="false">
+    <span id="search-count" class="search-count"></span>
+</div>
+
+<div class="conf-list" id="conf-list">
+    {% for item in conf_list %}
+    {% set status = conf_status[item] %}
+    <div class="conf-row {% if not status.enabled %}conf-row--disabled{% endif %} {% if (conf_infos and conf_infos.name == item) or (conf_name == item and conf_edit) or (log_conf_name == item) %}conf-row--active{% endif %}"
+         data-name="{{ item }}">
+        <div class="conf-row-left">
+            <span class="status-dot" data-conf="{{ item }}" title="Checking…"></span>
+            <span class="conf-row-name">{{ item }}</span>
+            {% if not status.enabled %}
+            <span class="badge badge--disabled">disabled</span>
+            {% endif %}
+            {% if status.days_left is not none %}
+                {% if status.days_left <= 7 %}
+                <span class="badge badge--danger" title="Expires {{ status.expiry }}">{{ status.days_left }}d</span>
+                {% elif status.days_left <= 30 %}
+                <span class="badge badge--warning" title="Expires {{ status.expiry }}">{{ status.days_left }}d</span>
+                {% else %}
+                <span class="badge badge--ok" title="Expires {{ status.expiry }}">{{ status.days_left }}d</span>
+                {% endif %}
+            {% endif %}
+        </div>
+        <form method="POST" class="conf-row-actions">
+            <input type="hidden" name="conf" value="{{ item }}">
+            <button type="submit" name="action" value="view" class="btn-action btn-action--view" title="View details">
+                <i class="bi bi-eye"></i><span>View</span>
+            </button>
+            <button type="submit" name="action" value="edit" class="btn-action btn-action--edit" title="Edit configuration">
+                <i class="bi bi-pencil"></i><span>Edit</span>
+            </button>
+            <button type="submit" name="action" value="clone" class="btn-action btn-action--clone" title="Clone to new service">
+                <i class="bi bi-copy"></i><span>Clone</span>
+            </button>
+            <button type="submit" name="action" value="logs" class="btn-action btn-action--logs" title="View access logs">
+                <i class="bi bi-terminal"></i><span>Logs</span>
+            </button>
+            <button type="submit" name="action" value="toggle" class="btn-action {% if status.enabled %}btn-action--disable{% else %}btn-action--enable{% endif %}"
+                    title="{% if status.enabled %}Disable{% else %}Enable{% endif %} this configuration">
+                <i class="bi bi-{% if status.enabled %}pause-circle{% else %}play-circle{% endif %}"></i>
+                <span>{% if status.enabled %}Disable{% else %}Enable{% endif %}</span>
+            </button>
+            <button type="submit" name="action" value="delete" class="btn-action btn-action--delete" title="Delete permanently"
+                    onclick="return confirm('Permanently delete &quot;{{ item }}&quot;? This cannot be undone.')">
+                <i class="bi bi-trash3"></i><span>Delete</span>
+            </button>
+        </form>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+    <i class="bi bi-inbox"></i>
+    <p>No configurations yet.</p>
+    <a href="{{ url_for('manager.create') }}" class="btn btn-primary">
+        <i class="bi bi-plus-circle"></i> Create your first service
+    </a>
+</div>
+{% endif %}
+
+{# ── Details panel (view) ── #}
+{% if conf_infos %}
+<div class="details-panel">
+    <div class="details-panel-header">
+        <span class="details-panel-title">
+            <i class="bi bi-file-earmark-code"></i> {{ conf_infos.name }}
+        </span>
+        <button type="button" class="panel-close" aria-label="Close"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div class="details-grid">
+        <div class="details-section">
+            <h4 class="details-section-title"><i class="bi bi-globe"></i> Proxy</h4>
+            <dl class="details-dl">
+                <dt>Server name</dt><dd>{{ conf_infos.server_name }}</dd>
+                <dt>Backend</dt><dd><code>{{ conf_infos.server }}</code></dd>
+            </dl>
+        </div>
+        <div class="details-section">
+            <h4 class="details-section-title"><i class="bi bi-shield-lock"></i> Certificate</h4>
+            <dl class="details-dl">
+                <dt>Subject</dt><dd>{{ conf_infos.certificate.subject }}</dd>
+                <dt>Issuer</dt><dd>{{ conf_infos.certificate.issuer }}</dd>
+                <dt>Serial</dt><dd><code>{{ conf_infos.certificate.serial_number }}</code></dd>
+                <dt>Valid from</dt><dd>{{ conf_infos.certificate.not_valid_before }}</dd>
+                <dt>Valid until</dt><dd>{{ conf_infos.certificate.not_valid_after }}</dd>
+            </dl>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{# ── Log viewer ── #}
+{% if log_conf_name is defined and log_conf_name %}
+<div class="log-panel">
+    <div class="log-panel-header">
+        <span class="log-panel-title">
+            <i class="bi bi-terminal"></i> Access log &mdash; {{ log_conf_name }}
+            <span class="log-lines-note">(last 50 lines)</span>
+        </span>
+        <div class="log-panel-controls">
+            <div class="log-search-wrap">
+                <i class="bi bi-search"></i>
+                <input type="text" id="log-search" placeholder="Search log…" autocomplete="off">
+            </div>
+            <button type="button" class="panel-close" aria-label="Close"><i class="bi bi-x-lg"></i></button>
+        </div>
+    </div>
+    {% if log_content %}
+    <pre class="log-content" id="log-content">{{ log_content }}</pre>
+    {% else %}
+    <div class="log-empty"><i class="bi bi-file-earmark-x"></i> Log file not found or empty.</div>
+    {% endif %}
+</div>
+{% endif %}
+
+{# ── Edit panel ── #}
+{% if conf_edit %}
+<div class="edit-panel">
+    <div class="edit-panel-header">
+        <span class="edit-panel-title">
+            <i class="bi bi-pencil-square"></i> Editing &mdash; {{ conf_name }}
+        </span>
+        <button type="button" class="panel-close" aria-label="Close"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <form method="POST" enctype="multipart/form-data" class="edit-panel-body">
+        <div class="edit-field">
+            <label class="edit-label" for="new_conf">Configuration</label>
+            <textarea id="new_conf" name="new_conf" class="edit-textarea">{{ conf_edit }}</textarea>
+        </div>
+        <div class="edit-ssl-row">
+            <div class="edit-field">
+                <label class="edit-label">Certificate <span class="optional">optional</span></label>
+                <input type="file" name="cert" accept=".crt" class="file-input">
+                <textarea name="cert_text" class="edit-paste" placeholder="Or paste PEM certificate"></textarea>
+            </div>
+            <div class="edit-field">
+                <label class="edit-label">Private key <span class="optional">optional</span></label>
+                <input type="file" name="key" accept=".key" class="file-input">
+                <textarea name="key_text" class="edit-paste" placeholder="Or paste private key"></textarea>
+            </div>
+        </div>
+        <div class="edit-footer">
+            <label class="checkbox-label">
+                <input type="checkbox" name="renew" value="renew">
+                <span>Renew certificate</span>
+            </label>
+            <input type="hidden" name="conf_name" value="{{ conf_name }}">
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-check-lg"></i> Save changes
+            </button>
+        </div>
+    </form>
+</div>
+{% endif %}
+
+<script>
+// ── Panel close buttons ──────────────────────────────────────────────
+document.querySelectorAll('.panel-close').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+        var panel = btn.closest('.details-panel, .log-panel, .edit-panel');
+        if (panel) panel.style.display = 'none';
+    });
+});
+
+// ── Search / filter ──────────────────────────────────────────────────
+(function () {
+    const input = document.getElementById('conf-search');
+    const countEl = document.getElementById('search-count');
+    if (!input) return;
+    const rows = Array.from(document.querySelectorAll('.conf-row'));
+    input.addEventListener('input', function () {
+        const q = this.value.trim().toLowerCase();
+        let shown = 0;
+        rows.forEach(function (row) {
+            const match = !q || row.dataset.name.toLowerCase().includes(q);
+            row.style.display = match ? '' : 'none';
+            if (match) shown++;
+        });
+        countEl.textContent = q ? shown + ' / ' + rows.length : '';
+    });
+})();
+
+// ── Backend reachability check (async) ──────────────────────────────
+(function () {
+    const dots = document.querySelectorAll('.status-dot[data-conf]');
+    if (!dots.length) return;
+    fetch('{{ url_for("manager.api_status") }}')
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            dots.forEach(function (dot) {
+                const conf = dot.dataset.conf;
+                const row = dot.closest('.conf-row');
+                const enabled = row && row.classList.contains('conf-row--disabled') === false;
+                if (!enabled) {
+                    dot.classList.add('status-dot--off');
+                    dot.title = 'Disabled';
+                } else if (data[conf] === true) {
+                    dot.classList.add('status-dot--up');
+                    dot.title = 'Backend reachable';
+                } else {
+                    dot.classList.add('status-dot--down');
+                    dot.title = 'Backend unreachable';
+                }
+            });
+        })
+        .catch(function () {
+            dots.forEach(function (dot) { dot.classList.add('status-dot--unknown'); });
+        });
+})();
+
+// ── Log search / highlight ───────────────────────────────────────────
+(function () {
+    const input = document.getElementById('log-search');
+    const pre = document.getElementById('log-content');
+    if (!input || !pre) return;
+    const raw = pre.textContent;
+    input.addEventListener('input', function () {
+        const q = this.value.trim();
+        if (!q) { pre.innerHTML = escapeHtml(raw); return; }
+        const regex = new RegExp('(' + escapeRegex(q) + ')', 'gi');
+        pre.innerHTML = escapeHtml(raw).replace(
+            new RegExp(escapeRegex(escapeHtml(q)), 'gi'),
+            '<mark>$&</mark>'
+        );
+        // scroll to first match
+        const first = pre.querySelector('mark');
+        if (first) first.scrollIntoView({ block: 'center' });
+    });
+    function escapeHtml(s) {
+        return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+    function escapeRegex(s) {
+        return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+})();
+</script>
 {% endblock %}

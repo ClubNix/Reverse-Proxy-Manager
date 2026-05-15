@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Set up 2FA &mdash; Reverse Proxy Manager{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2 class="page-title"><i class="bi bi-shield-plus"></i> Set up two-factor authentication</h2>
+    <p class="page-subtitle">Scan the QR code with your authenticator app, then verify with a code.</p>
+</div>
+
+{% if error %}
+<div class="alert-modern error">
+    <i class="bi bi-exclamation-triangle"></i> {{ error }}
+</div>
+{% endif %}
+
+<div class="totp-setup-card">
+    <div class="totp-setup-steps">
+        <div class="totp-step">
+            <span class="totp-step-num">1</span>
+            <p>Scan this QR code with <strong>Google Authenticator</strong>, <strong>Authy</strong>, or any TOTP-compatible app.</p>
+        </div>
+
+        <div class="totp-qr-block">
+            <img src="{{ url_for('auth.totp_qr') }}" alt="QR code" class="totp-qr">
+        </div>
+
+        <div class="totp-step">
+            <span class="totp-step-num">or</span>
+            <div style="flex:1">
+                <p style="margin-bottom: 0.5rem;">Enter the secret key manually if your app doesn't support QR codes.</p>
+                <div class="totp-secret-row">
+                    <code class="totp-secret">{{ secret }}</code>
+                </div>
+            </div>
+        </div>
+
+        <div class="totp-step">
+            <span class="totp-step-num">2</span>
+            <p>Enter the 6-digit code shown in your app to confirm the setup.</p>
+        </div>
+    </div>
+
+    <form method="POST" class="totp-setup-form">
+        <div class="field">
+            <label for="code">Verification code</label>
+            <input type="text" id="code" name="code"
+                   inputmode="numeric" pattern="[0-9]{6}" maxlength="6"
+                   autocomplete="one-time-code" required autofocus
+                   placeholder="000000" class="totp-input">
+        </div>
+        <div class="totp-setup-footer">
+            <a href="{{ url_for('auth.settings') }}" class="btn btn-secondary">Cancel</a>
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-shield-check"></i> Activate TOTP
+            </button>
+        </div>
+    </form>
+</div>
+{% endblock %}

@@ -1,3 +1,6 @@
 flask
+flask-login
 cryptography
 gunicorn
+pyotp
+qrcode[pil]

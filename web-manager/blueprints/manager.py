@@ -1,35 +1,29 @@
 import flask
-from flask import Blueprint, render_template, request, send_from_directory, send_file
+from flask import Blueprint, render_template, request, send_from_directory, jsonify
+from flask_login import login_required
 import logging
 import os
 import subprocess
+import socket
+import tempfile
 from typing import Dict, Any
 import shutil
 import re
 import tarfile
+import time
+from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
-import logging
-import time
 
 
 def handle_logs(logger_name, log_file_name):
-    # Create a logger
     logger = logging.getLogger(logger_name)
-
-    # Set the level of the logger. This can be DEBUG, INFO, WARNING, ERROR, CRITICAL.
     logger.setLevel(logging.DEBUG)
-
-    # Create a file handler
     handler = logging.FileHandler(f"/app/logs/{log_file_name}")
-
-    # Create a formatter and add it to the handler
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     handler.setFormatter(formatter)
-
-    # Add the handler to the logger
     logger.addHandler(handler)
-
     return logger
 
 
@@ -62,15 +56,14 @@ class ReverseProxyManager:
             'DAYS': os.getenv('SSL_DAYS', '365')
         }
 
+    # ── Nginx reload ──────────────────────────────────────────────────
+
     def reload_nginx(self) -> tuple[bool, str]:
         with open(f'{self.app_scripts_path}/check_conf', 'w') as f:
             f.write('check')
-
         time.sleep(1)
-
         with open(f'{self.app_scripts_path}/check_conf_status', 'r') as f:
             return_code = f.readline().strip()
-
             if return_code != '0':
                 error = f.read().strip()
                 logger.error(f'Configuration check failed: {error}')
@@ -81,47 +74,61 @@ class ReverseProxyManager:
                 logger.info('Reloading Nginx')
                 return True, 'OK'
 
+    # ── Address validation ────────────────────────────────────────────
+
     def address_check(self, server: str) -> bool:
         m = self.addr_with_path_pattern.match(server.strip())
         if not m:
             return False
-
         host = m.group('host')
         port = m.group('port')
         path = m.group('path')
-
         if not re.match(self.ip_pattern, host):
             return False
-
         if port is not None:
             try:
                 if not 1 <= int(port) <= 65535:
                     return False
             except ValueError:
                 return False
-
         if path is not None and not path.startswith('/'):
             return False
-
         return True
 
+    # ── Config file helpers ───────────────────────────────────────────
+
+    def _conf_path(self, conf_name: str) -> str:
+        """Return the actual path of the conf file (enabled or disabled)."""
+        enabled = f'{self.app_conf_path}/{conf_name}.conf'
+        disabled = f'{self.app_conf_path}/{conf_name}.conf.disabled'
+        if os.path.exists(enabled):
+            return enabled
+        if os.path.exists(disabled):
+            return disabled
+        raise FileNotFoundError(f'No configuration found for {conf_name}')
+
+    def _is_enabled(self, conf_name: str) -> bool:
+        return os.path.exists(f'{self.app_conf_path}/{conf_name}.conf')
+
     def get_conf_list(self) -> list:
-        conf_list = []
-        for conf in os.listdir(self.app_conf_path):
-            conf_list.append(conf[:-5])
-        return sorted(conf_list)
+        names = set()
+        for filename in os.listdir(self.app_conf_path):
+            if filename.endswith('.conf.disabled'):
+                names.add(filename[:-14])
+            elif filename.endswith('.conf'):
+                names.add(filename[:-5])
+        return sorted(names)
 
     def get_conf(self, conf_name: str) -> str:
-        with open(f'{self.app_conf_path}/{conf_name}.conf', 'r') as f:
+        with open(self._conf_path(conf_name), 'r') as f:
             return f.read().strip()
 
     def get_conf_infos(self, conf_name: str) -> Dict[str, Any]:
-        with open(f'{self.app_conf_path}/{conf_name}.conf', 'r') as f:
+        with open(self._conf_path(conf_name), 'r') as f:
             conf = f.read()
         with open(f'{self.app_ssl_path}/{conf_name}.crt', 'rb') as f:
-            crt = f.read()
-            crt = x509.load_pem_x509_certificate(crt, default_backend())
-        infos = {
+            crt = x509.load_pem_x509_certificate(f.read(), default_backend())
+        return {
             'name': conf_name,
             'server_name': conf.split('server_name ')[1].split(';')[0],
             'server': conf.split('proxy_pass ')[1].split(';')[0],
@@ -133,22 +140,19 @@ class ReverseProxyManager:
                 'not_valid_after': crt.not_valid_after_utc
             }
         }
-        return infos
 
     def edit_conf(self,
                   conf_name: str,
                   conf_content: str,
                   cert_path: str = None,
                   key_path: str = None) -> None:
-        with open(f'{self.app_conf_path}/{conf_name}.conf', 'w') as f:
+        with open(self._conf_path(conf_name), 'w') as f:
             f.write(conf_content.replace('\r\n', '\n').strip() + '\n')
-
         if cert_path and key_path:
             shutil.copy(cert_path, f'{self.app_ssl_path}/{conf_name}.crt')
             shutil.copy(key_path, f'{self.app_ssl_path}/{conf_name}.key')
             os.remove(cert_path)
             os.remove(key_path)
-
         logger.info(f'Configuration {conf_name} edited')
 
     def create_conf(self,
@@ -164,7 +168,7 @@ class ReverseProxyManager:
         default upgrade;
         '' close;
     }}
-    
+
     # {description}
     server {{
         listen 80;
@@ -203,7 +207,7 @@ class ReverseProxyManager:
             proxy_set_header X-Forwarded-Proto $scheme;
             proxy_set_header X-Forwarded-For $remote_addr;
             proxy_set_header X-Real-IP $remote_addr;
-    
+
             proxy_pass {service_type}://{server};
         }}
     }}
@@ -211,7 +215,6 @@ class ReverseProxyManager:
         os.makedirs(f'{self.app_log_path}/{domain}', exist_ok=True)
         with open(f'{self.app_conf_path}/{domain}.conf', 'w') as f:
             f.write(conf)
-
         if cert_path and key_path:
             shutil.copy(cert_path, f'{self.app_ssl_path}/{domain}.crt')
             shutil.copy(key_path, f'{self.app_ssl_path}/{domain}.key')
@@ -219,12 +222,10 @@ class ReverseProxyManager:
             os.remove(key_path)
         else:
             self.generate_ssl(domain)
-
         logger.info(f"Configuration {domain} created")
 
     def generate_ssl(self, domain: str) -> None:
         ssl_conf = self.ssl_conf
-
         ext_cnf_path = f'{self.app_ssl_path}/{domain}.ext.cnf'
         with open(ext_cnf_path, 'w') as f:
             f.write(rf"""
@@ -246,7 +247,7 @@ class ReverseProxyManager:
     DNS.1 = {domain}
     """)
             try:
-                process = subprocess.run([
+                subprocess.run([
                     'openssl', 'req', '-new', '-newkey', 'rsa:4096', '-sha256', '-days',
                     ssl_conf['DAYS'], '-nodes', '-x509', '-keyout', f'{self.app_ssl_path}/{domain}.key',
                     '-out', f'{self.app_ssl_path}/{domain}.crt',
@@ -256,23 +257,146 @@ class ReverseProxyManager:
             except subprocess.CalledProcessError as e:
                 logger.error(f"Failed to generate SSL certificate for {domain}: {e}")
             os.remove(ext_cnf_path)
-
-            logger.info(f"SSL certificate for {domain} generated")
+        logger.info(f"SSL certificate for {domain} generated")
 
     def remove_conf(self, conf_name: str) -> None:
-        os.remove(f'{self.app_conf_path}/{conf_name}.conf')
-        os.remove(f'{self.app_ssl_path}/{conf_name}.crt')
-        os.remove(f'{self.app_ssl_path}/{conf_name}.key')
+        try:
+            os.remove(self._conf_path(conf_name))
+        except FileNotFoundError:
+            pass
+        for ext in ['.crt', '.key']:
+            p = f'{self.app_ssl_path}/{conf_name}{ext}'
+            if os.path.exists(p):
+                os.remove(p)
         shutil.rmtree(f'{self.app_log_path}/{conf_name}', ignore_errors=True)
-
-        logger.info(f"Configuration {conf_name} removed")
+        logger.info(f'Configuration {conf_name} removed')
         self.reload_nginx()
+
+    def enable_conf(self, conf_name: str) -> None:
+        os.rename(
+            f'{self.app_conf_path}/{conf_name}.conf.disabled',
+            f'{self.app_conf_path}/{conf_name}.conf'
+        )
+        logger.info(f'Configuration {conf_name} enabled')
+
+    def disable_conf(self, conf_name: str) -> None:
+        os.rename(
+            f'{self.app_conf_path}/{conf_name}.conf',
+            f'{self.app_conf_path}/{conf_name}.conf.disabled'
+        )
+        logger.info(f'Configuration {conf_name} disabled')
+
+    # ── Status & monitoring ───────────────────────────────────────────
+
+    def get_cert_expiry(self, conf_name: str) -> dict:
+        cert_path = f'{self.app_ssl_path}/{conf_name}.crt'
+        if not os.path.exists(cert_path):
+            return {'days_left': None, 'expiry': None}
+        try:
+            with open(cert_path, 'rb') as f:
+                crt = x509.load_pem_x509_certificate(f.read(), default_backend())
+            expiry = crt.not_valid_after_utc
+            days_left = (expiry - datetime.now(timezone.utc)).days
+            return {'days_left': days_left, 'expiry': expiry.strftime('%Y-%m-%d')}
+        except Exception:
+            return {'days_left': None, 'expiry': None}
+
+    def get_all_conf_status(self) -> dict:
+        """Returns {conf_name: {enabled, days_left, expiry}} for all configs."""
+        result = {}
+        for conf_name in self.get_conf_list():
+            expiry = self.get_cert_expiry(conf_name)
+            result[conf_name] = {
+                'enabled': self._is_enabled(conf_name),
+                'days_left': expiry['days_left'],
+                'expiry': expiry['expiry'],
+            }
+        return result
+
+    def check_backend(self, proxy_pass_value: str) -> bool:
+        """TCP connect check to the backend server."""
+        server = re.sub(r'^https?://', '', proxy_pass_value.strip())
+        m = self.addr_with_path_pattern.match(server)
+        if not m:
+            return False
+        host = m.group('host')
+        port = int(m.group('port') or 80)
+        try:
+            with socket.create_connection((host, port), timeout=0.5):
+                return True
+        except (socket.timeout, ConnectionRefusedError, OSError):
+            return False
+
+    def get_log_tail(self, conf_name: str, lines: int = 200) -> str | None:
+        log_path = f'{self.app_log_path}/{conf_name}/access.log'
+        if not os.path.exists(log_path):
+            return None
+        with open(log_path, 'r', errors='replace') as f:
+            all_lines = f.readlines()
+        return ''.join(all_lines[-lines:])
+
+    # ── Backup & restore ──────────────────────────────────────────────
 
     def backup_nginx(self) -> None:
         with tarfile.open(f'{self.app_scripts_path}/nginx.tar.gz', 'w:gz') as tar:
             tar.add(self.app_nginx_path, arcname=os.path.basename(self.app_nginx_path))
-
         logger.info('Nginx configuration backed up')
+
+    def restore_backup(self, file_obj) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            archive_path = os.path.join(tmp, 'restore.tar.gz')
+            file_obj.save(archive_path)
+            with tarfile.open(archive_path, 'r:gz') as tar:
+                tar.extractall(path=tmp, filter='data')
+            extracted = os.path.join(tmp, 'nginx')
+            if not os.path.isdir(extracted):
+                raise ValueError('Invalid backup: nginx directory not found in archive')
+            # conf.d, certs (and nginx itself) are Docker volume mount points — we
+            # cannot rmtree them (EBUSY). Clear their contents file-by-file instead.
+            for subdir in ('conf.d', 'certs'):
+                src = os.path.join(extracted, subdir)
+                dst = os.path.join(self.app_nginx_path, subdir)
+                if not os.path.isdir(src):
+                    continue
+                os.makedirs(dst, exist_ok=True)
+                for name in os.listdir(dst):
+                    p = os.path.join(dst, name)
+                    shutil.rmtree(p) if os.path.isdir(p) else os.remove(p)
+                for name in os.listdir(src):
+                    shutil.copy2(os.path.join(src, name), os.path.join(dst, name))
+            # Recreate per-domain log directories so nginx can open its log files
+            for conf_name in self.get_conf_list():
+                os.makedirs(os.path.join(self.app_log_path, conf_name), exist_ok=True)
+        logger.info('Nginx configuration restored from backup')
+
+    # ── Clone helper ──────────────────────────────────────────────────
+
+    def parse_conf_for_clone(self, conf_name: str) -> dict:
+        """Extract create-form values from an existing config."""
+        conf = self.get_conf(conf_name)
+        # description: first # comment
+        desc_match = re.search(r'#\s+(.+)\n', conf)
+        description = desc_match.group(1).strip() if desc_match else ''
+        # allow_origin
+        ao_match = re.search(r'Access-Control-Allow-Origin "([^"]+)"', conf)
+        allow_origin = ao_match.group(1) if ao_match else '*'
+        # service_type and server from proxy_pass
+        pp_match = re.search(r'proxy_pass\s+(https?)://([^;]+);', conf)
+        if pp_match:
+            service_type = pp_match.group(1)
+            server = pp_match.group(2).strip()
+        else:
+            service_type = 'http'
+            server = ''
+        return {
+            'domain': '',  # intentionally blank — user must choose a new domain
+            'server': server,
+            'description': description,
+            'allow_origin': allow_origin,
+            'service_type': service_type,
+        }
+
+    # ── File upload helper ────────────────────────────────────────────
 
     def handle_cert_key_upload(self, conf_name: str, form_request: flask.Request) -> tuple[Any, Any]:
         cert = form_request.files['cert'] if 'cert' in form_request.files else None
@@ -285,7 +409,7 @@ class ReverseProxyManager:
 
         if (not cert and key) or (not cert_text and key_text):
             tmp_cert_path = tmp_key_path = None
-        elif cert and key:
+        elif cert and cert.filename and key and key.filename:
             cert.save(tmp_cert_path)
             key.save(tmp_key_path)
         elif cert_text and key_text:
@@ -298,56 +422,83 @@ class ReverseProxyManager:
         return tmp_cert_path, tmp_key_path
 
 
+# ── Routes ────────────────────────────────────────────────────────────
+
 @bp.route('/manage', methods=['GET', 'POST'])
+@login_required
 def manage() -> str | flask.Response:
     handler = ReverseProxyManager()
     conf_list = handler.get_conf_list()
-    if request.method == 'POST':
-        if 'new_conf' in request.form:
-            new_conf = request.form['new_conf']
-            conf_name = request.form['conf_name']
+    conf_status = handler.get_all_conf_status()
 
+    if request.method == 'POST':
+        # Edit form submission
+        if 'new_conf' in request.form:
+            conf_name = request.form['conf_name']
+            new_conf = request.form['new_conf']
             cert_path, key_path = handler.handle_cert_key_upload(conf_name, request)
             handler.edit_conf(conf_name, new_conf, cert_path, key_path)
             check, status = handler.reload_nginx()
             if not check:
-                return render_template('manage.html', conf_list=conf_list, message='Failed to reload Nginx, error in configuration', error=status, success=False, conf_edit=new_conf, conf_name=conf_name)
-
+                return render_template('manage.html', conf_list=conf_list, conf_status=conf_status,
+                                       message='Failed to reload Nginx — check configuration syntax',
+                                       error=status, success=False, conf_edit=new_conf, conf_name=conf_name)
             if 'renew' in request.form:
                 handler.generate_ssl(conf_name)
-
-            return render_template('manage.html', conf_list=conf_list, message='Configuration edited', success=True)
+            conf_status = handler.get_all_conf_status()
+            return render_template('manage.html', conf_list=conf_list, conf_status=conf_status,
+                                   message='Configuration saved', success=True)
 
         action = request.form['action']
         conf_name = request.form['conf']
 
-        if conf_name == 'Choose...':
-            return render_template('manage.html', conf_list=conf_list)
-
-        conf_content = handler.get_conf(conf_name)
-
         if action == 'view':
             conf_infos = handler.get_conf_infos(conf_name)
-            return render_template('manage.html', conf_list=conf_list, conf_infos=conf_infos)
+            return render_template('manage.html', conf_list=conf_list, conf_status=conf_status,
+                                   conf_infos=conf_infos)
+
         elif action == 'delete':
             handler.remove_conf(conf_name)
             conf_list = handler.get_conf_list()
-            return render_template('manage.html', conf_list=conf_list, message='Configuration removed', success=True)
+            conf_status = handler.get_all_conf_status()
+            return render_template('manage.html', conf_list=conf_list, conf_status=conf_status,
+                                   message=f'"{conf_name}" deleted', success=True)
+
         elif action == 'edit':
-            return render_template('manage.html', conf_list=conf_list,
+            conf_content = handler.get_conf(conf_name)
+            return render_template('manage.html', conf_list=conf_list, conf_status=conf_status,
                                    conf_edit=conf_content, conf_name=conf_name)
+
         elif action == 'logs':
-            return send_file(f'{handler.app_log_path}/{conf_name}/access.log',
-                             download_name=f'{conf_name}.access.log', as_attachment=True)
-    else:
-        return render_template('manage.html', conf_list=conf_list)
+            log_content = handler.get_log_tail(conf_name, lines=50)
+            return render_template('manage.html', conf_list=conf_list, conf_status=conf_status,
+                                   log_content=log_content, log_conf_name=conf_name)
+
+        elif action == 'toggle':
+            if handler._is_enabled(conf_name):
+                handler.disable_conf(conf_name)
+                msg = f'"{conf_name}" disabled'
+            else:
+                handler.enable_conf(conf_name)
+                msg = f'"{conf_name}" enabled'
+            handler.reload_nginx()
+            conf_list = handler.get_conf_list()
+            conf_status = handler.get_all_conf_status()
+            return render_template('manage.html', conf_list=conf_list, conf_status=conf_status,
+                                   message=msg, success=True)
+
+        elif action == 'clone':
+            prefill = handler.parse_conf_for_clone(conf_name)
+            return render_template('create.html', prefill=prefill, clone_source=conf_name)
+
+    return render_template('manage.html', conf_list=conf_list, conf_status=conf_status)
 
 
 @bp.route('/create', methods=['GET', 'POST'])
+@login_required
 def create() -> str:
     if request.method == 'POST':
         handler = ReverseProxyManager()
-
         domain = request.form['domain']
         server = request.form['server']
         description = request.form['description']
@@ -355,8 +506,7 @@ def create() -> str:
         allow_origin = request.form['allow_origin']
 
         if domain == '' or server == '':
-            return render_template('create.html',
-                                   message='Domain and server address are required', success=False)
+            return render_template('create.html', message='Domain and server address are required', success=False)
         if allow_origin == '':
             allow_origin = '*'
 
@@ -366,18 +516,74 @@ def create() -> str:
             return render_template('create.html', message='Domain already exists', success=False)
         if not handler.address_check(server):
             return render_template('create.html', message='Invalid server address', success=False)
+
         handler.create_conf(domain, server, description, service_type, allow_origin, cert_path, key_path)
         check, status = handler.reload_nginx()
         if not check:
-            return render_template('create.html', message='Configuration created but failed to reload Nginx, check error in conf', error=status, success=False)
+            return render_template('create.html',
+                                   message='Configuration created but Nginx failed to reload — check syntax',
+                                   error=status, success=False)
 
-        return render_template('create.html', message='Configuration created', success=True)
-    else:
-        return render_template('create.html')
+        return render_template('create.html', message=f'"{domain}" created successfully', success=True)
+    return render_template('create.html')
 
 
 @bp.route('/backup', methods=['GET'])
-def backup() -> flask.Response:
+@login_required
+def backup() -> str:
+    return render_template('backup.html')
+
+
+@bp.route('/backup/download', methods=['GET'])
+@login_required
+def backup_download() -> flask.Response:
     handler = ReverseProxyManager()
     handler.backup_nginx()
-    return send_from_directory(directory=f'{handler.app_scripts_path}', path='nginx.tar.gz', as_attachment=True)
+    return send_from_directory(directory=f'{handler.app_scripts_path}',
+                               path='nginx.tar.gz', as_attachment=True)
+
+
+@bp.route('/backup/restore', methods=['POST'])
+@login_required
+def backup_restore() -> str:
+    handler = ReverseProxyManager()
+    if 'backup_file' not in request.files or not request.files['backup_file'].filename:
+        return render_template('backup.html', message='No file selected', success=False)
+    f = request.files['backup_file']
+    if not f.filename.endswith('.tar.gz'):
+        return render_template('backup.html', message='File must be a .tar.gz archive', success=False)
+    try:
+        handler.restore_backup(f)
+        check, status = handler.reload_nginx()
+        if not check:
+            return render_template('backup.html',
+                                   message='Restored but Nginx failed to reload — check configurations',
+                                   error=status, success=False)
+        return render_template('backup.html', message='Backup restored and Nginx reloaded', success=True)
+    except Exception as e:
+        logger.error(f'Restore failed: {e}')
+        return render_template('backup.html', message=f'Restore failed: {e}', success=False)
+
+
+@bp.route('/api/status', methods=['GET'])
+@login_required
+def api_status() -> flask.Response:
+    """Returns JSON {conf_name: bool} indicating backend reachability."""
+    handler = ReverseProxyManager()
+    conf_list = handler.get_conf_list()
+
+    def check_one(conf_name: str) -> bool:
+        try:
+            conf = handler.get_conf(conf_name)
+            proxy_pass = conf.split('proxy_pass ')[1].split(';')[0].strip()
+            return handler.check_backend(proxy_pass)
+        except Exception:
+            return False
+
+    results = {}
+    if conf_list:
+        with ThreadPoolExecutor(max_workers=min(len(conf_list), 20)) as executor:
+            for conf_name, reachable in zip(conf_list, executor.map(check_one, conf_list)):
+                results[conf_name] = reachable
+
+    return jsonify(results)

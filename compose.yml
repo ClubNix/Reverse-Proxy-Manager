@@ -30,6 +30,7 @@ services:
       - certs:/app/nginx/certs
       - scripts:/app/scripts
       - ./logs:/app/logs
+      - data:/app/data
     restart: unless-stopped
 
 volumes:
@@ -37,3 +38,4 @@ volumes:
   conf:
   certs:
   scripts:
+  data:

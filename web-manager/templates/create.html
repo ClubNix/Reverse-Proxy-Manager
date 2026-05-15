@@ -1,73 +1,107 @@
 {% extends "base.html" %}
-{% block title %}Reverse Proxy Manager{% endblock %}
+{% block title %}Create &mdash; Reverse Proxy Manager{% endblock %}
 {% block content %}
-<div class="starter-template text-center py-5 px-3">
-    <br>
-
-        {% if message %}
-        <div class="{% if success %}text-success{% else %}text-danger{% endif %}">
-            <p>{{ message }}</p>
-        </div>
+<div class="page-header">
+    <h2 class="page-title"><i class="bi bi-plus-circle"></i> Create service</h2>
+    <p class="page-subtitle">
+        {% if clone_source %}
+        Cloning <strong>{{ clone_source }}</strong> — fill in the new domain to continue.
+        {% else %}
+        Add a new nginx reverse proxy configuration.
         {% endif %}
-        {% if error %}
-        <div class="text-danger">
-            <p>{{ error }}</p>
-        </div>
-        {% endif %}
+    </p>
+</div>
 
-        <div class="form">
-            <form method="POST" enctype="multipart/form-data">
-                <fieldset>
-                    <legend>Create service</legend>
-                    <div class="input-group">
-                        <span class="input-group addon">Domain</span>
-                        <label for="domain"></label>
-                        <input type="text" id="domain" name="domain" placeholder="example.com" required>
-                    </div>
-                    <div class="input-group">
-                        <span class="input-group addon">Server</span>
-                        <label for="server"></label>
-                        <input type="text" id="server" name="server" placeholder="127.0.0.1:5000" required>
-                    </div>
-                    <div class="input-group">
-                        <span class="input-group addon">Description</span>
-                        <label for="description"></label>
-                        <input type="text" id="description" name="description" placeholder="My service">
-                    </div>
-                    <div class="input-group">
-                        <span class="input-group addon">Allow Origin</span>
-                        <label for="allow_origin"></label>
-                        <input type="text" id="allow_origin" name="allow_origin" placeholder="*">
-                    </div>
-                    <div class="input-group">
-                        <span class="input-group addon">Service Type</span>
-                        <label for="service_type"></label>
-                        <select id="service_type" name="service_type">
-                            <option value="http">HTTP</option>
-                            <option value="https">HTTPS</option>
-                        </select>
-                    </div>
-                    <div class="input-group">
-                        <span class="input-group addon">Certificate</span>
-                        <label for="cert"></label>
-                        <input class="input-group file" type="file" id="cert" name="cert" accept=".crt">
-                        <label for="cert_text"></label>
-                        <textarea id="cert_text" name="cert_text" placeholder="Or paste your certificate"></textarea>
-                    </div>
-                    <div class="input-group">
-                        <span class="input-group addon">Key</span>
-                        <label for="key"></label>
-                        <input class="input-group file" type="file" id="key" name="key" accept=".key">
-                        <label for="key_text"></label>
-                        <textarea id="key_text" name="key_text" placeholder="Or paste your key"></textarea>
-                    </div>
+{% if message %}
+<div class="alert-modern {% if success %}success{% else %}error{% endif %}">
+    <i class="bi bi-{% if success %}check-circle{% else %}exclamation-triangle{% endif %}"></i>
+    {{ message }}
+</div>
+{% endif %}
+{% if error %}
+<div class="alert-modern error">
+    <i class="bi bi-exclamation-triangle"></i>
+    {{ error }}
+</div>
+{% endif %}
 
-                    <div class="input-group">
-                        <button type="submit" class="btn btn-primary mb-3">Submit</button>
-                    </div>
-                </fieldset>
-            </form>
+<div class="create-card">
+    <form method="POST" enctype="multipart/form-data">
+
+        <div class="create-section">
+            <h3 class="create-section-title"><i class="bi bi-globe"></i> Service</h3>
+            <div class="field-grid">
+                <div class="field field--required">
+                    <label for="domain">Domain</label>
+                    <input type="text" id="domain" name="domain"
+                           placeholder="example.com" required
+                           value="{{ prefill.domain if prefill else '' }}">
+                </div>
+                <div class="field field--required">
+                    <label for="server">Backend server</label>
+                    <input type="text" id="server" name="server"
+                           placeholder="127.0.0.1:5000" required
+                           value="{{ prefill.server if prefill else '' }}">
+                </div>
+                <div class="field">
+                    <label for="description">Description</label>
+                    <input type="text" id="description" name="description"
+                           placeholder="Short description"
+                           value="{{ prefill.description if prefill else '' }}">
+                </div>
+                <div class="field">
+                    <label for="allow_origin">Allow-Origin</label>
+                    <input type="text" id="allow_origin" name="allow_origin"
+                           placeholder="* (default)"
+                           value="{{ prefill.allow_origin if prefill else '' }}">
+                </div>
+            </div>
+
+            <div class="field">
+                <label>Backend protocol</label>
+                <div class="radio-group">
+                    <label class="radio-option">
+                        <input type="radio" name="service_type" value="http"
+                               {% if not prefill or prefill.service_type == 'http' %}checked{% endif %}>
+                        <span class="radio-label"><i class="bi bi-unlock"></i> HTTP</span>
+                    </label>
+                    <label class="radio-option">
+                        <input type="radio" name="service_type" value="https"
+                               {% if prefill and prefill.service_type == 'https' %}checked{% endif %}>
+                        <span class="radio-label"><i class="bi bi-lock"></i> HTTPS</span>
+                    </label>
+                </div>
+                <p class="field-hint">Protocol used to reach your backend server. nginx always exposes HTTPS publicly.</p>
+            </div>
         </div>
-    <br>
+
+        <div class="create-divider">
+            <span>SSL certificate <span class="optional">— leave empty to auto-generate a self-signed cert</span></span>
+        </div>
+
+        <div class="create-section">
+            <div class="field-grid field-grid--ssl">
+                <div class="field">
+                    <label>Certificate <span class="optional">(.crt)</span></label>
+                    <input type="file" id="cert" name="cert" accept=".crt" class="file-input">
+                    <div class="field-or">or paste</div>
+                    <textarea name="cert_text" class="paste-area" placeholder="-----BEGIN CERTIFICATE-----"></textarea>
+                </div>
+                <div class="field">
+                    <label>Private key <span class="optional">(.key)</span></label>
+                    <input type="file" id="key" name="key" accept=".key" class="file-input">
+                    <div class="field-or">or paste</div>
+                    <textarea name="key_text" class="paste-area" placeholder="-----BEGIN PRIVATE KEY-----"></textarea>
+                </div>
+            </div>
+        </div>
+
+        <div class="create-footer">
+            <button type="submit" class="btn btn-primary btn--lg">
+                <i class="bi bi-check-lg"></i>
+                {% if clone_source %}Clone as new service{% else %}Create service{% endif %}
+            </button>
+        </div>
+    </form>
 </div>
 {% endblock %}

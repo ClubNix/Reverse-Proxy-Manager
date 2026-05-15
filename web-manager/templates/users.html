@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Users &mdash; Reverse Proxy Manager{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2 class="page-title"><i class="bi bi-people"></i> Users</h2>
+    <p class="page-subtitle">{{ users | length }} user{{ 's' if users | length != 1 else '' }} registered.</p>
+</div>
+
+{% if message %}
+<div class="alert-modern {% if success %}success{% else %}error{% endif %}">
+    <i class="bi bi-{% if success %}check-circle{% else %}exclamation-triangle{% endif %}"></i>
+    {{ message }}
+</div>
+{% endif %}
+
+<div class="users-grid">
+
+    <div class="users-card">
+        <div class="users-card-header">
+            <i class="bi bi-person-plus"></i>
+            <div>
+                <h3>Add user</h3>
+                <p>Create a new account.</p>
+            </div>
+        </div>
+        <form method="POST" class="settings-form">
+            <input type="hidden" name="action" value="add">
+            <div class="field">
+                <label for="new_username">Username</label>
+                <input type="text" id="new_username" name="username"
+                       required autocomplete="off">
+            </div>
+            <div class="field">
+                <label for="new_password">Password</label>
+                <input type="password" id="new_password" name="password"
+                       required autocomplete="new-password">
+            </div>
+            <div>
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-person-plus"></i> Create user
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <div class="users-card">
+        <div class="users-card-header">
+            <i class="bi bi-people"></i>
+            <div>
+                <h3>Registered users</h3>
+                <p>Manage existing accounts.</p>
+            </div>
+        </div>
+        <div class="users-list">
+            {% for user in users %}
+            <div class="users-row {% if user.id == current_user.id %}users-row--current{% endif %}">
+                <div class="users-row-info">
+                    <i class="bi bi-person-circle"></i>
+                    <span class="users-row-name">{{ user.username }}</span>
+                    {% if user.id == current_user.id %}
+                    <span class="badge badge--ok">you</span>
+                    {% endif %}
+                    {% if user.has_totp %}
+                    <span class="badge badge--info"><i class="bi bi-shield-lock"></i> 2FA</span>
+                    {% endif %}
+                </div>
+                {% if current_user.id == 1 and user.id != current_user.id %}
+                <form method="POST">
+                    <input type="hidden" name="action" value="delete">
+                    <input type="hidden" name="user_id" value="{{ user.id }}">
+                    <button type="submit" class="btn-action btn-action--delete"
+                            onclick="return confirm('Delete user &quot;{{ user.username }}&quot;?')">
+                        <i class="bi bi-trash3"></i>
+                    </button>
+                </form>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+</div>
+{% endblock %}

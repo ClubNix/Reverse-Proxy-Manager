@@ -1,20 +1,30 @@
 {% extends "base.html" %}
 {% block title %}Reverse Proxy Manager{% endblock %}
 {% block content %}
-<div class="starter-template text-center py-5 px-3">
-    <h1>Reverse Proxy Manager</h1>
-    <br>
-    <div>
-        <button type="button" class="btn btn-transparent">
-            <a href="{{ url_for('manager.manage') }}">MANAGE</a>
-        </button>
-        <button type="button" class="btn btn-transparent">
-            <a href="{{ url_for('manager.create') }}">CREATE</a>
-        </button>
-        <button type="button" class="btn btn-transparent">
-            <a href="{{ url_for('manager.backup') }}">BACKUP</a>
-        </button>
+<div class="hero">
+    <div class="hero-content">
+        <div class="hero-badge">
+            <i class="bi bi-shield-check"></i> Reverse Proxy Manager
+        </div>
+        <h1 class="hero-title">Manage your <span class="hero-accent">services</span></h1>
+        <p class="hero-subtitle">Control and configure your nginx reverse proxy configurations with ease.</p>
+        <div class="hero-actions">
+            <a href="{{ url_for('manager.manage') }}" class="hero-btn">
+                <i class="bi bi-sliders"></i>
+                <span>Manage</span>
+                <i class="bi bi-arrow-right hero-btn-arrow"></i>
+            </a>
+            <a href="{{ url_for('manager.create') }}" class="hero-btn">
+                <i class="bi bi-plus-circle"></i>
+                <span>Create</span>
+                <i class="bi bi-arrow-right hero-btn-arrow"></i>
+            </a>
+            <a href="{{ url_for('manager.backup') }}" class="hero-btn">
+                <i class="bi bi-archive"></i>
+                <span>Backup</span>
+                <i class="bi bi-arrow-right hero-btn-arrow"></i>
+            </a>
+        </div>
     </div>
-    <br>
 </div>
 {% endblock %}

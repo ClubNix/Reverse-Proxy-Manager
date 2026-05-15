@@ -6,13 +6,37 @@
 @import 'button.css';
 @import 'form.css';
 @import 'manage.css';
+@import 'auth.css';
 
-@import url("https://fonts.googleapis.com/css2?family=Montserrat&family=Roboto&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap");
 
 :root {
-    --text-color: rgb(33, 37, 41);
-    --form-text-color: rgb(211, 224, 234);
-    --input-group-background-color: rgb(255, 255, 255);
-    --input-group-addon-color: rgb(33, 37, 41);
-    --fieldset-border-color: rgb(33, 37, 41);
+    --bg-primary: #0f172a;
+    --bg-secondary: #1e293b;
+    --bg-tertiary: #334155;
+    --border-color: #334155;
+    --accent: #6366f1;
+    --accent-hover: #4f46e5;
+    --accent-danger: #ef4444;
+    --accent-danger-hover: #dc2626;
+    --accent-warning: #f59e0b;
+    --accent-warning-hover: #d97706;
+    --accent-success: #10b981;
+    --accent-success-hover: #059669;
+    --accent-info: #38bdf8;
+    --text-primary: #f1f5f9;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+    --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.3), 0 2px 4px -2px rgb(0 0 0 / 0.3);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.4), 0 4px 6px -4px rgb(0 0 0 / 0.4);
+    --radius: 12px;
+    --radius-sm: 8px;
+    --transition: 200ms ease;
+
+    /* legacy variables kept for compatibility */
+    --text-color: #f1f5f9;
+    --form-text-color: #94a3b8;
+    --input-group-background-color: #0f172a;
+    --input-group-addon-color: #334155;
+    --fieldset-border-color: #334155;
 }

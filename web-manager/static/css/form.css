@@ -1,91 +1,250 @@
+/* ── Create card ──────────────────────────────────────────────────── */
+.create-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    margin-bottom: 2rem;
+}
+
+.create-section {
+    padding: 1.75rem 2rem;
+}
+.create-section + .create-section {
+    border-top: 1px solid var(--border-color);
+}
+
+.create-section-title {
+    font-size: 0.875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    margin-bottom: 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+.create-section-title i {
+    color: var(--accent);
+    font-size: 0.9rem;
+}
+
+/* ── Field grid ───────────────────────────────────────────────────── */
+.field-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem 1.5rem;
+    margin-bottom: 1.25rem;
+}
+@media (max-width: 640px) {
+    .field-grid { grid-template-columns: 1fr; }
+}
+.field-grid--ssl {
+    margin-bottom: 0;
+}
+
+/* ── Individual field ─────────────────────────────────────────────── */
+.field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+.field label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+.field--required label::after {
+    content: ' *';
+    color: var(--accent-danger);
+}
+.field input[type="text"],
+.field input[type="email"],
+.field input[type="url"],
+.field input[type="password"] {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-family: 'Inter', 'Montserrat', sans-serif;
+    font-size: 0.9rem;
+    padding: 0.6rem 0.875rem;
+    outline: none;
+    transition: border-color var(--transition), box-shadow var(--transition);
+}
+.field input[type="text"]:focus,
+.field input[type="email"]:focus,
+.field input[type="url"]:focus,
+.field input[type="password"]:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+.field input::placeholder {
+    color: var(--text-muted);
+}
+
+/* ── Radio group (service type) ───────────────────────────────────── */
+.radio-group {
+    display: flex;
+    gap: 0.625rem;
+    margin-bottom: 0.5rem;
+}
+.radio-option {
+    cursor: pointer;
+}
+.radio-option input[type="radio"] {
+    display: none;
+}
+.radio-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.5rem 1.125rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: all var(--transition);
+    cursor: pointer;
+    user-select: none;
+}
+.radio-option input[type="radio"]:checked + .radio-label {
+    background: rgba(99, 102, 241, 0.15);
+    border-color: var(--accent);
+    color: #a5b4fc;
+}
+.radio-label:hover {
+    border-color: #475569;
+    color: var(--text-primary);
+}
+
+.field-hint {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin: 0;
+    line-height: 1.5;
+}
+.optional {
+    font-size: 0.75rem;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--text-muted);
+}
+
+/* ── Divider label ────────────────────────────────────────────────── */
+.create-divider {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0 2rem;
+    border-top: 1px solid var(--border-color);
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    font-weight: 500;
+    height: 0;
+    overflow: visible;
+}
+.create-divider span {
+    background: var(--bg-secondary);
+    padding: 0 0.75rem;
+    white-space: nowrap;
+    position: relative;
+    top: 0;
+    line-height: 1;
+}
+
+/* ── File input + paste area ──────────────────────────────────────── */
+.file-input {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    padding: 0.375rem 0.75rem;
+    cursor: pointer;
+    outline: none;
+    transition: border-color var(--transition);
+}
+.file-input:focus {
+    border-color: var(--accent);
+}
+.file-input::file-selector-button {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: none;
+    padding: 0.25rem 0.7rem;
+    border-radius: 5px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    margin-right: 0.75rem;
+    font-family: 'Inter', 'Montserrat', sans-serif;
+    transition: background var(--transition);
+}
+.file-input::file-selector-button:hover {
+    background: var(--accent);
+    color: #fff;
+}
+
+.field-or {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-align: center;
+    padding: 0.35rem 0;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.paste-area {
+    width: 100%;
+    min-height: 5.5rem;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    font-family: 'Courier New', 'Consolas', monospace;
+    font-size: 0.8rem;
+    padding: 0.625rem 0.875rem;
+    resize: vertical;
+    outline: none;
+    transition: border-color var(--transition);
+}
+.paste-area:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+.paste-area::placeholder {
+    color: var(--text-muted);
+    opacity: 0.6;
+}
+
+/* ── Create footer ────────────────────────────────────────────────── */
+.create-footer {
+    padding: 1.25rem 2rem 1.75rem;
+    border-top: 1px solid var(--border-color);
+}
+.btn--lg {
+    padding: 0.7rem 1.75rem;
+    font-size: 0.95rem;
+}
+
+/* ── Legacy input-group styles (kept for any remaining usage) ─────── */
 .center-form {
     display: flex;
     justify-content: center;
-}
-.center-form > select {
-    margin: 0 15px;
-}
-.center-form > .btn {
-    height: 100%;
-}
-
-.create-form input {
-    margin: 0.5rem;
-}
-
-.form {
-    margin-top: 2rem;
-    margin-bottom: 2rem;
-    display: flex;
     align-items: center;
-    justify-content: center;
-    color: var(--form-text-color);
-}
-.form > form {
-    width: 75%;
-}
-.form fieldset {
-    border: 2px solid var(--fieldset-border-color);
-    border-radius: 5px;
-    padding: 1rem;
-}
-.form fieldset > legend {
-    font-size: 1.5rem;
-    font-weight: bold;
-    color: var(--text-color);
-    float: none !important;
-    width: auto;
-    padding: 0 10px;
-}
-.form legend {
-    color: var(--text-color);
+    gap: 0.5rem;
+    flex-wrap: wrap;
 }
 .form-group {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-}
-
-.input-group {
-    display: flex;
-    align-content: stretch;
-    padding: 1rem;
-}
-.input-group > input, .input-group > textarea, .input-group > select {
-    flex: 1 0 auto;
-    font-family: Montserrat, sans-serif;
-    font-size: 1rem;
-    border-top-right-radius: 5px;
-    border-bottom-right-radius: 5px;
-}
-.input-group > input {
-    color: var(--text-color);
-    padding-left: .5rem;
-}
-.input-group > select {
-    background: var(--input-group-background-color);
-}
-.input-group .addon {
-    background: var(--input-group-addon-color);
-    border: 1px solid var(--input-group-addon-color);
-    border-radius: 5px;
-    padding: .5rem 1rem;
-    width: 150px;
-}
-.input-group .file {
-    border-radius: 5px;
-    padding: .5rem 1rem;
-    width: 150px;
-    border: 1px solid var(--input-group-addon-color);
-    background: var(--input-group-background-color);
-    margin-right: 1rem;
-}
-.input-group .btn {
-    width: 100%;
-    border-radius: 5px !important;
-}
-.input-group > textarea {
-    border: 1px solid var(--input-group-addon-color) !important;
-    margin-left: unset !important;
 }

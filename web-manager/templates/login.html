@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/import.css') }}">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='album/favicon.ico') }}">
+    <title>Sign in &mdash; Reverse Proxy Manager</title>
+</head>
+<body class="auth-body">
+<div class="auth-container">
+    <div class="auth-card">
+        <div class="auth-header">
+            <img src="{{ url_for('static', filename='album/logo.png') }}" alt="Logo" class="auth-logo">
+            <h1 class="auth-title">Sign in</h1>
+            <p class="auth-subtitle">Reverse Proxy Manager</p>
+        </div>
+
+        {% if error %}
+        <div class="alert-modern error" style="margin-bottom: 1.25rem;">
+            <i class="bi bi-exclamation-triangle"></i> {{ error }}
+        </div>
+        {% endif %}
+
+        <form method="POST" class="auth-form">
+            <input type="hidden" name="next" value="{{ next }}">
+            <div class="field">
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username"
+                       autocomplete="username" required autofocus
+                       placeholder="your username">
+            </div>
+            <div class="field">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password"
+                       autocomplete="current-password" required
+                       placeholder="••••••••">
+            </div>
+            <button type="submit" class="btn btn-primary btn--lg btn--full">
+                <i class="bi bi-box-arrow-in-right"></i> Sign in
+            </button>
+        </form>
+    </div>
+</div>
+</body>
+</html>

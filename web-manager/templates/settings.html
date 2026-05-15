@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Settings &mdash; Reverse Proxy Manager{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2 class="page-title"><i class="bi bi-gear"></i> Settings</h2>
+    <p class="page-subtitle">Manage your account security.</p>
+</div>
+
+{% if message %}
+<div class="alert-modern {% if success %}success{% else %}error{% endif %}">
+    <i class="bi bi-{% if success %}check-circle{% else %}exclamation-triangle{% endif %}"></i>
+    {{ message }}
+</div>
+{% endif %}
+
+<div class="settings-grid">
+
+    <div class="settings-card">
+        <div class="settings-card-header">
+            <i class="bi bi-key"></i>
+            <div>
+                <h3>Change password</h3>
+                <p>Update your login password.</p>
+            </div>
+        </div>
+        <form method="POST" class="settings-form">
+            <input type="hidden" name="action" value="change_password">
+            <div class="field">
+                <label for="current_password">Current password</label>
+                <input type="password" id="current_password" name="current_password"
+                       autocomplete="current-password" required>
+            </div>
+            <div class="field">
+                <label for="new_password">New password</label>
+                <input type="password" id="new_password" name="new_password"
+                       autocomplete="new-password" required>
+            </div>
+            <div class="field">
+                <label for="confirm_password">Confirm new password</label>
+                <input type="password" id="confirm_password" name="confirm_password"
+                       autocomplete="new-password" required>
+            </div>
+            <div>
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-check-lg"></i> Update password
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <div class="settings-card">
+        <div class="settings-card-header">
+            <i class="bi bi-shield-lock"></i>
+            <div>
+                <h3>Two-factor authentication</h3>
+                <p>Adds a required TOTP code step after your password.</p>
+            </div>
+        </div>
+
+        {% if current_user.has_totp %}
+        <div class="totp-status-badge totp-status-badge--on">
+            <i class="bi bi-check-circle"></i> TOTP is enabled on your account
+        </div>
+        <form method="POST" class="settings-form">
+            <input type="hidden" name="action" value="disable_totp">
+            <div class="field">
+                <label for="totp_password">Confirm your password to disable</label>
+                <input type="password" id="totp_password" name="totp_password"
+                       autocomplete="current-password" required>
+            </div>
+            <div>
+                <button type="submit" class="btn btn-danger"
+                        onclick="return confirm('Disable two-factor authentication?')">
+                    <i class="bi bi-shield-x"></i> Disable TOTP
+                </button>
+            </div>
+        </form>
+        {% else %}
+        <div class="totp-status-badge totp-status-badge--off">
+            <i class="bi bi-shield-exclamation"></i> TOTP is not enabled
+        </div>
+        <div>
+            <a href="{{ url_for('auth.totp_setup') }}" class="btn btn-primary">
+                <i class="bi bi-shield-plus"></i> Set up TOTP
+            </a>
+        </div>
+        {% endif %}
+    </div>
+
+</div>
+{% endblock %}

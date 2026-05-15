@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Backup &mdash; Reverse Proxy Manager{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2 class="page-title"><i class="bi bi-archive"></i> Backup & Restore</h2>
+    <p class="page-subtitle">Download a snapshot of all nginx configurations, certificates and keys.</p>
+</div>
+
+{% if message %}
+<div class="alert-modern {% if success %}success{% else %}error{% endif %}">
+    <i class="bi bi-{% if success %}check-circle{% else %}exclamation-triangle{% endif %}"></i>
+    {{ message }}
+</div>
+{% endif %}
+{% if error %}
+<div class="alert-modern error">
+    <i class="bi bi-exclamation-triangle"></i>
+    {{ error }}
+</div>
+{% endif %}
+
+<div class="backup-grid">
+
+    <div class="backup-card">
+        <div class="backup-card-header">
+            <i class="bi bi-download"></i>
+            <div>
+                <h3>Create backup</h3>
+                <p>Download a <code>.tar.gz</code> archive of all configurations, certs and keys.</p>
+            </div>
+        </div>
+        <a href="{{ url_for('manager.backup_download') }}" class="btn btn-primary btn--lg">
+            <i class="bi bi-download"></i> Download backup
+        </a>
+    </div>
+
+    <div class="backup-card">
+        <div class="backup-card-header">
+            <i class="bi bi-upload"></i>
+            <div>
+                <h3>Restore from backup</h3>
+                <p>Upload a previously created <code>.tar.gz</code> backup to replace the current configuration.</p>
+            </div>
+        </div>
+        <div class="backup-warning">
+            <i class="bi bi-exclamation-triangle"></i>
+            This will overwrite all current configurations, certificates and keys.
+        </div>
+        <form method="POST" action="{{ url_for('manager.backup_restore') }}" enctype="multipart/form-data" class="restore-form">
+            <div class="field">
+                <label for="backup_file">Backup archive</label>
+                <input type="file" id="backup_file" name="backup_file" accept=".tar.gz,.gz" class="file-input" required>
+            </div>
+            <button type="submit" class="btn btn-danger btn--lg"
+                    onclick="return confirm('This will replace ALL current configurations. Are you sure?')">
+                <i class="bi bi-arrow-counterclockwise"></i> Restore
+            </button>
+        </form>
+    </div>
+
+</div>
+{% endblock %}

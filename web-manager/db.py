@@ -22,7 +22,7 @@ def get_or_create_secret_key() -> bytes:
 
 @contextmanager
 def _connect():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     try:
         yield conn
@@ -34,6 +34,7 @@ def _connect():
 def init_db() -> None:
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     with _connect() as conn:
+        conn.execute('PRAGMA journal_mode=WAL')
         conn.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

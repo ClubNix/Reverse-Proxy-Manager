@@ -126,22 +126,33 @@ class ReverseProxyManager:
     def get_conf_infos(self, conf_name: str) -> Dict[str, Any]:
         with open(self._conf_path(conf_name), 'r') as f:
             conf = f.read()
-        with open(f'{self.app_ssl_path}/{conf_name}.crt', 'rb') as f:
-            crt = x509.load_pem_x509_certificate(f.read(), default_backend())
         desc_match = re.search(r'#\s+(.+)\n', conf)
         description = desc_match.group(1).strip() if desc_match else ''
+        sn_match = re.search(r'server_name\s+([^;]+);', conf)
+        server_name = sn_match.group(1).strip() if sn_match else ''
+        pp_match = re.search(r'proxy_pass\s+([^;]+);', conf)
+        server = pp_match.group(1).strip() if pp_match else None
+        cert_info = None
+        cert_path = f'{self.app_ssl_path}/{conf_name}.crt'
+        if os.path.exists(cert_path):
+            try:
+                with open(cert_path, 'rb') as f:
+                    crt = x509.load_pem_x509_certificate(f.read(), default_backend())
+                cert_info = {
+                    'subject': crt.subject.rfc4514_string(),
+                    'issuer': crt.issuer.rfc4514_string(),
+                    'serial_number': crt.serial_number,
+                    'not_valid_before': crt.not_valid_before_utc,
+                    'not_valid_after': crt.not_valid_after_utc,
+                }
+            except Exception:
+                pass
         return {
             'name': conf_name,
             'description': description,
-            'server_name': conf.split('server_name ')[1].split(';')[0],
-            'server': conf.split('proxy_pass ')[1].split(';')[0],
-            'certificate': {
-                'subject': crt.subject.rfc4514_string(),
-                'issuer': crt.issuer.rfc4514_string(),
-                'serial_number': crt.serial_number,
-                'not_valid_before': crt.not_valid_before_utc,
-                'not_valid_after': crt.not_valid_after_utc
-            }
+            'server_name': server_name,
+            'server': server,
+            'certificate': cert_info,
         }
 
     def edit_conf(self,

@@ -36,11 +36,14 @@
                 <dt>Description</dt><dd>{{ conf_infos.description }}</dd>
                 {% endif %}
                 <dt>Server name</dt><dd>{{ conf_infos.server_name }}</dd>
+                {% if conf_infos.server %}
                 <dt>Backend</dt><dd><code>{{ conf_infos.server }}</code></dd>
+                {% endif %}
             </dl>
         </div>
         <div class="details-section">
             <h4 class="details-section-title"><i class="bi bi-shield-lock"></i> Certificate</h4>
+            {% if conf_infos.certificate %}
             <dl class="details-dl">
                 <dt>Subject</dt><dd>{{ conf_infos.certificate.subject }}</dd>
                 <dt>Issuer</dt><dd>{{ conf_infos.certificate.issuer }}</dd>
@@ -48,6 +51,9 @@
                 <dt>Valid from</dt><dd>{{ conf_infos.certificate.not_valid_before }}</dd>
                 <dt>Valid until</dt><dd>{{ conf_infos.certificate.not_valid_after }}</dd>
             </dl>
+            {% else %}
+            <p style="font-size:0.85rem;color:var(--text-muted);margin:0;">No certificate.</p>
+            {% endif %}
         </div>
     </div>
 </div>

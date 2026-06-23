@@ -128,8 +128,11 @@ class ReverseProxyManager:
             conf = f.read()
         with open(f'{self.app_ssl_path}/{conf_name}.crt', 'rb') as f:
             crt = x509.load_pem_x509_certificate(f.read(), default_backend())
+        desc_match = re.search(r'#\s+(.+)\n', conf)
+        description = desc_match.group(1).strip() if desc_match else ''
         return {
             'name': conf_name,
+            'description': description,
             'server_name': conf.split('server_name ')[1].split(';')[0],
             'server': conf.split('proxy_pass ')[1].split(';')[0],
             'certificate': {

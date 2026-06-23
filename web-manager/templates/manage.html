@@ -19,71 +19,6 @@
 </div>
 {% endif %}
 
-{% if conf_list %}
-<div class="search-bar">
-    <i class="bi bi-search"></i>
-    <input type="text" id="conf-search" placeholder="Filter configurations…" autocomplete="off" spellcheck="false">
-    <span id="search-count" class="search-count"></span>
-</div>
-
-<div class="conf-list" id="conf-list">
-    {% for item in conf_list %}
-    {% set status = conf_status[item] %}
-    <div class="conf-row {% if not status.enabled %}conf-row--disabled{% endif %} {% if (conf_infos and conf_infos.name == item) or (conf_name == item and conf_edit) or (log_conf_name == item) %}conf-row--active{% endif %}"
-         data-name="{{ item }}">
-        <div class="conf-row-left">
-            <span class="status-dot" data-conf="{{ item }}" title="Checking…"></span>
-            <span class="conf-row-name">{{ item }}</span>
-            {% if not status.enabled %}
-            <span class="badge badge--disabled">disabled</span>
-            {% endif %}
-            {% if status.days_left is not none %}
-                {% if status.days_left <= 7 %}
-                <span class="badge badge--danger" title="Expires {{ status.expiry }}">{{ status.days_left }}d</span>
-                {% elif status.days_left <= 30 %}
-                <span class="badge badge--warning" title="Expires {{ status.expiry }}">{{ status.days_left }}d</span>
-                {% else %}
-                <span class="badge badge--ok" title="Expires {{ status.expiry }}">{{ status.days_left }}d</span>
-                {% endif %}
-            {% endif %}
-        </div>
-        <form method="POST" class="conf-row-actions">
-            <input type="hidden" name="conf" value="{{ item }}">
-            <button type="submit" name="action" value="view" class="btn-action btn-action--view" title="View details">
-                <i class="bi bi-eye"></i><span>View</span>
-            </button>
-            <button type="submit" name="action" value="edit" class="btn-action btn-action--edit" title="Edit configuration">
-                <i class="bi bi-pencil"></i><span>Edit</span>
-            </button>
-            <button type="submit" name="action" value="clone" class="btn-action btn-action--clone" title="Clone to new service">
-                <i class="bi bi-copy"></i><span>Clone</span>
-            </button>
-            <button type="submit" name="action" value="logs" class="btn-action btn-action--logs" title="View access logs">
-                <i class="bi bi-terminal"></i><span>Logs</span>
-            </button>
-            <button type="submit" name="action" value="toggle" class="btn-action {% if status.enabled %}btn-action--disable{% else %}btn-action--enable{% endif %}"
-                    title="{% if status.enabled %}Disable{% else %}Enable{% endif %} this configuration">
-                <i class="bi bi-{% if status.enabled %}pause-circle{% else %}play-circle{% endif %}"></i>
-                <span>{% if status.enabled %}Disable{% else %}Enable{% endif %}</span>
-            </button>
-            <button type="submit" name="action" value="delete" class="btn-action btn-action--delete" title="Delete permanently"
-                    onclick="return confirm('Permanently delete &quot;{{ item }}&quot;? This cannot be undone.')">
-                <i class="bi bi-trash3"></i><span>Delete</span>
-            </button>
-        </form>
-    </div>
-    {% endfor %}
-</div>
-{% else %}
-<div class="empty-state">
-    <i class="bi bi-inbox"></i>
-    <p>No configurations yet.</p>
-    <a href="{{ url_for('manager.create') }}" class="btn btn-primary">
-        <i class="bi bi-plus-circle"></i> Create your first service
-    </a>
-</div>
-{% endif %}
-
 {# ── Details panel (view) ── #}
 {% if conf_infos %}
 <div class="details-panel">
@@ -97,6 +32,9 @@
         <div class="details-section">
             <h4 class="details-section-title"><i class="bi bi-globe"></i> Proxy</h4>
             <dl class="details-dl">
+                {% if conf_infos.description %}
+                <dt>Description</dt><dd>{{ conf_infos.description }}</dd>
+                {% endif %}
                 <dt>Server name</dt><dd>{{ conf_infos.server_name }}</dd>
                 <dt>Backend</dt><dd><code>{{ conf_infos.server }}</code></dd>
             </dl>
@@ -179,12 +117,80 @@
 </div>
 {% endif %}
 
+{% if conf_list %}
+<div class="search-bar">
+    <i class="bi bi-search"></i>
+    <input type="text" id="conf-search" placeholder="Filter configurations…" autocomplete="off" spellcheck="false">
+    <span id="search-count" class="search-count"></span>
+</div>
+
+<div class="conf-list" id="conf-list">
+    {% for item in conf_list %}
+    {% set status = conf_status[item] %}
+    <div class="conf-row {% if not status.enabled %}conf-row--disabled{% endif %} {% if (conf_infos and conf_infos.name == item) or (conf_name == item and conf_edit) or (log_conf_name == item) %}conf-row--active{% endif %}"
+         data-name="{{ item }}">
+        <div class="conf-row-left">
+            <span class="status-dot" data-conf="{{ item }}" title="Checking…"></span>
+            <span class="conf-row-name">{{ item }}</span>
+            {% if not status.enabled %}
+            <span class="badge badge--disabled">disabled</span>
+            {% endif %}
+            {% if status.days_left is not none %}
+                {% if status.days_left <= 7 %}
+                <span class="badge badge--danger" title="Expires {{ status.expiry }}">{{ status.days_left }}d</span>
+                {% elif status.days_left <= 30 %}
+                <span class="badge badge--warning" title="Expires {{ status.expiry }}">{{ status.days_left }}d</span>
+                {% else %}
+                <span class="badge badge--ok" title="Expires {{ status.expiry }}">{{ status.days_left }}d</span>
+                {% endif %}
+            {% endif %}
+        </div>
+        <form method="POST" class="conf-row-actions">
+            <input type="hidden" name="conf" value="{{ item }}">
+            <button type="submit" name="action" value="view" class="btn-action btn-action--view" title="View details">
+                <i class="bi bi-eye"></i><span>View</span>
+            </button>
+            <button type="submit" name="action" value="edit" class="btn-action btn-action--edit" title="Edit configuration">
+                <i class="bi bi-pencil"></i><span>Edit</span>
+            </button>
+            <button type="submit" name="action" value="clone" class="btn-action btn-action--clone" title="Clone to new service">
+                <i class="bi bi-copy"></i><span>Clone</span>
+            </button>
+            <button type="submit" name="action" value="logs" class="btn-action btn-action--logs" title="View access logs">
+                <i class="bi bi-terminal"></i><span>Logs</span>
+            </button>
+            <button type="submit" name="action" value="toggle" class="btn-action {% if status.enabled %}btn-action--disable{% else %}btn-action--enable{% endif %}"
+                    title="{% if status.enabled %}Disable{% else %}Enable{% endif %} this configuration">
+                <i class="bi bi-{% if status.enabled %}pause-circle{% else %}play-circle{% endif %}"></i>
+                <span>{% if status.enabled %}Disable{% else %}Enable{% endif %}</span>
+            </button>
+            <button type="submit" name="action" value="delete" class="btn-action btn-action--delete" title="Delete permanently"
+                    onclick="return confirm('Permanently delete &quot;{{ item }}&quot;? This cannot be undone.')">
+                <i class="bi bi-trash3"></i><span>Delete</span>
+            </button>
+        </form>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+    <i class="bi bi-inbox"></i>
+    <p>No configurations yet.</p>
+    <a href="{{ url_for('manager.create') }}" class="btn btn-primary">
+        <i class="bi bi-plus-circle"></i> Create your first service
+    </a>
+</div>
+{% endif %}
+
 <script>
 // ── Panel close buttons ──────────────────────────────────────────────
 document.querySelectorAll('.panel-close').forEach(function (btn) {
     btn.addEventListener('click', function () {
         var panel = btn.closest('.details-panel, .log-panel, .edit-panel');
         if (panel) panel.style.display = 'none';
+        document.querySelectorAll('.conf-row--active').forEach(function (row) {
+            row.classList.remove('conf-row--active');
+        });
     });
 });
 
@@ -243,12 +249,10 @@ document.querySelectorAll('.panel-close').forEach(function (btn) {
     input.addEventListener('input', function () {
         const q = this.value.trim();
         if (!q) { pre.innerHTML = escapeHtml(raw); return; }
-        const regex = new RegExp('(' + escapeRegex(q) + ')', 'gi');
         pre.innerHTML = escapeHtml(raw).replace(
             new RegExp(escapeRegex(escapeHtml(q)), 'gi'),
             '<mark>$&</mark>'
         );
-        // scroll to first match
         const first = pre.querySelector('mark');
         if (first) first.scrollIntoView({ block: 'center' });
     });

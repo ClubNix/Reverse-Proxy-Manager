@@ -138,6 +138,11 @@
         <div class="conf-row-left">
             <span class="status-dot" data-conf="{{ item }}" title="Checking…"></span>
             <span class="conf-row-name">{{ item }}</span>
+            {% if status.server_name and status.server_name != '_' %}
+            <a href="https://{{ status.server_name }}" target="_blank" rel="noopener" class="btn-open-tab" title="Open {{ status.server_name }}">
+                <i class="bi bi-box-arrow-up-right"></i>
+            </a>
+            {% endif %}
             {% if not status.enabled %}
             <span class="badge badge--disabled">disabled</span>
             {% endif %}

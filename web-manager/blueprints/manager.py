@@ -316,14 +316,22 @@ class ReverseProxyManager:
             return {'days_left': None, 'expiry': None}
 
     def get_all_conf_status(self) -> dict:
-        """Returns {conf_name: {enabled, days_left, expiry}} for all configs."""
+        """Returns {conf_name: {enabled, days_left, expiry, server_name}} for all configs."""
         result = {}
         for conf_name in self.get_conf_list():
             expiry = self.get_cert_expiry(conf_name)
+            try:
+                with open(self._conf_path(conf_name), 'r') as f:
+                    conf = f.read()
+                sn_match = re.search(r'server_name\s+([^;]+);', conf)
+                server_name = sn_match.group(1).strip() if sn_match else ''
+            except Exception:
+                server_name = ''
             result[conf_name] = {
                 'enabled': self._is_enabled(conf_name),
                 'days_left': expiry['days_left'],
                 'expiry': expiry['expiry'],
+                'server_name': server_name,
             }
         return result
 

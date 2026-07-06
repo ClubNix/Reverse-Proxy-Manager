@@ -85,6 +85,27 @@
     text-overflow: ellipsis;
 }
 
+/* ── Open-in-tab link ─────────────────────────────────────────────── */
+.btn-open-tab {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.4rem;
+    height: 1.4rem;
+    border-radius: 5px;
+    border: 1px solid transparent;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    flex-shrink: 0;
+    transition: all var(--transition);
+    text-decoration: none;
+}
+.btn-open-tab:hover {
+    color: var(--accent);
+    border-color: rgba(99, 102, 241, 0.35);
+    background: rgba(99, 102, 241, 0.1);
+}
+
 /* ── Status dot ───────────────────────────────────────────────────── */
 .status-dot {
     width: 8px;

@@ -23,14 +23,24 @@ RUN mkdir -p /opt && \
 RUN mv $NGINX_DIR/nginx.conf $NGINX_DIR/nginx.conf.bak
 
 COPY ./conf/nginx.conf $NGINX_DIR/nginx.conf
+COPY ./conf/unavailable.html $NGINX_DIR/unavailable/unavailable.html
+COPY ./conf/unavailable.inc $NGINX_DIR/unavailable.inc
 COPY ./conf/manager.sh /opt/manager.sh
 COPY ./conf/watch_reload_nginx.sh /opt/scripts/watch_reload_nginx.sh
 COPY ./conf/watch_conf_check.sh /opt/scripts/watch_conf_check.sh
 
+# Fallback self-signed certificate for the catch-all (unavailable) server
+RUN mkdir -p $NGINX_DIR/default-ssl && \
+    openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
+        -keyout $NGINX_DIR/default-ssl/default.key \
+        -out $NGINX_DIR/default-ssl/default.crt \
+        -subj "/CN=unavailable" > /dev/null 2>&1
+
 # Configure nginx
 RUN sed -i "s|\$NGINX_DIR|$NGINX_DIR|g" $NGINX_DIR/nginx.conf && \
     sed -i "s|\$NGINX_CONF_DIR|$NGINX_CONF_DIR|g" $NGINX_DIR/nginx.conf && \
-    sed -i "s|\$NGINX_LOG_DIR|$NGINX_LOG_DIR|g" $NGINX_DIR/nginx.conf
+    sed -i "s|\$NGINX_LOG_DIR|$NGINX_LOG_DIR|g" $NGINX_DIR/nginx.conf && \
+    sed -i "s|\$NGINX_DIR|$NGINX_DIR|g" $NGINX_DIR/unavailable.inc
 
 # Get manager script
 RUN sed -i "s|\$NGINX_CONF_DIR_REPLACE|$NGINX_CONF_DIR|g" /opt/manager.sh && \

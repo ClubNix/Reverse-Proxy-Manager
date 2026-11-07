@@ -20,7 +20,9 @@ from cryptography.hazmat.backends import default_backend
 def handle_logs(logger_name, log_file_name):
     logger = logging.getLogger(logger_name)
     logger.setLevel(logging.DEBUG)
-    handler = logging.FileHandler(f"/app/logs/{log_file_name}")
+    log_dir = os.getenv('LOG_DIR', '/app/logs')
+    os.makedirs(log_dir, exist_ok=True)
+    handler = logging.FileHandler(os.path.join(log_dir, log_file_name))
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     handler.setFormatter(formatter)
     logger.addHandler(handler)
@@ -294,16 +296,19 @@ class ReverseProxyManager:
     [alt_names]
     DNS.1 = {domain}
     """)
-            try:
-                subprocess.run([
-                    'openssl', 'req', '-new', '-newkey', 'rsa:4096', '-sha256', '-days',
-                    ssl_conf['DAYS'], '-nodes', '-x509', '-keyout', f'{self.app_ssl_path}/{domain}.key',
-                    '-out', f'{self.app_ssl_path}/{domain}.crt',
-                    '-subj', f"/C={ssl_conf['COUNTRY']}/ST={ssl_conf['STATE']}/L={ssl_conf['LOCATION']}/O={ssl_conf['ORGANIZATION-GLOBAL']}/OU={ssl_conf['ORGANIZATION-UNIT']}/CN={domain}",
-                    '-config', ext_cnf_path
-                ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-            except subprocess.CalledProcessError as e:
-                logger.error(f"Failed to generate SSL certificate for {domain}: {e}")
+        # openssl must run after the file is closed, otherwise it reads an
+        # unflushed (empty) config and the certificate has no subjectAltName.
+        try:
+            subprocess.run([
+                'openssl', 'req', '-new', '-newkey', 'rsa:4096', '-sha256', '-days',
+                ssl_conf['DAYS'], '-nodes', '-x509', '-keyout', f'{self.app_ssl_path}/{domain}.key',
+                '-out', f'{self.app_ssl_path}/{domain}.crt',
+                '-subj', f"/C={ssl_conf['COUNTRY']}/ST={ssl_conf['STATE']}/L={ssl_conf['LOCATION']}/O={ssl_conf['ORGANIZATION-GLOBAL']}/OU={ssl_conf['ORGANIZATION-UNIT']}/CN={domain}",
+                '-config', ext_cnf_path
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to generate SSL certificate for {domain}: {e}")
+        finally:
             os.remove(ext_cnf_path)
         logger.info(f"SSL certificate for {domain} generated")
 

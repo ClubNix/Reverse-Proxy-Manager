@@ -343,7 +343,7 @@ select option in "Add service" "Remove service" "List services" "Backup nginx" "
     case $option in
         "Add service")
             echo ""
-            read -r -p "Enter server name like service.clubnix.fr: " server_name
+            read -r -p "Enter server name like service.domain.tld: " server_name
             result=$(echo "$server_name" | pcregrep '(?=^.{1,254}$)(^(?>(?!\d+\.)[a-zA-Z0-9_\-]{1,63}\.?)+(?:[a-zA-Z]{2,})$)')
             if [[ -z "$server_name" ]]; then
                 echo -e "${Red}No server name entered${No_Color}"

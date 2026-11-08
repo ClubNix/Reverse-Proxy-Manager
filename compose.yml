@@ -18,9 +18,9 @@ services:
     environment:
       - SSL_COUNTRY=FR
       - SSL_STATE=France
-      - SSL_CITY=Noisy-le-Grand
-      - SSL_ORGANIZATION_GLOBAL=ESIEE Paris
-      - SSL_ORGANIZATION_UNIT=Club*Nix
+      - SSL_CITY=Paris
+      - SSL_ORGANIZATION_GLOBAL=isnubi
+      - SSL_ORGANIZATION_UNIT=Homelab
       - SSL_DAYS=365
     ports:
       - 5000:5000

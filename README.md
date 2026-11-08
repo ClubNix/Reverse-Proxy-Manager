@@ -1,5 +1,7 @@
 # Reverse Proxy Manager
 
+[![Tests](https://github.com/ClubNix/Reverse-Proxy-Manager/actions/workflows/tests.yml/badge.svg)](https://github.com/ClubNix/Reverse-Proxy-Manager/actions/workflows/tests.yml)
+
 A web application for managing an Nginx reverse proxy: create, edit, enable/disable, and delete proxy configurations with automatic SSL certificate generation, all through a browser UI.
 
 ## Features
@@ -8,6 +10,7 @@ A web application for managing an Nginx reverse proxy: create, edit, enable/disa
 - Automatic self-signed SSL certificate generation per service
 - Certificate expiry badges with visual warnings (7 / 30 day thresholds)
 - Enable / disable configurations without deleting them
+- "Service unavailable" (503) page for disabled or unknown domains, instead of falling through to another service
 - Clone an existing configuration as a starting point
 - Live backend reachability status per service
 - Access log viewer (last 50 lines) with in-page search
@@ -43,9 +46,9 @@ services:
     environment:
       - SSL_COUNTRY=FR
       - SSL_STATE=France
-      - SSL_CITY=Noisy-le-Grand
-      - SSL_ORGANIZATION_GLOBAL=ESIEE Paris
-      - SSL_ORGANIZATION_UNIT=Club*Nix
+      - SSL_CITY=Paris
+      - SSL_ORGANIZATION_GLOBAL=isnubi
+      - SSL_ORGANIZATION_UNIT=Homelab
       - SSL_DAYS=365
     ports:
       - 5000:5000
@@ -90,12 +93,13 @@ Environment variables for the `web-manager` service:
 | --- | --- | --- |
 | `SSL_COUNTRY` | `FR` | Country code for generated certificates |
 | `SSL_STATE` | `France` | State / province |
-| `SSL_CITY` | `Noisy-le-Grand` | City |
-| `SSL_ORGANIZATION_GLOBAL` | `ESIEE Paris` | Organisation name |
-| `SSL_ORGANIZATION_UNIT` | `Club*Nix` | Organisation unit |
+| `SSL_CITY` | `Paris` | City |
+| `SSL_ORGANIZATION_GLOBAL` | `isnubi` | Organisation name |
+| `SSL_ORGANIZATION_UNIT` | `Homelab` | Organisation unit |
 | `SSL_DAYS` | `365` | Certificate validity in days |
 | `FLASK_SECRET_KEY` | *(auto-generated)* | Override the Flask secret key |
 | `AUTH_DB_PATH` | `/app/data/users.db` | Path to the SQLite database |
+| `LOG_DIR` | `/app/logs` | Directory for the web manager application logs |
 
 ### Volumes
 
@@ -144,6 +148,52 @@ docker exec -it web-manager python manage_users.py list
 docker exec -it web-manager python manage_users.py reset-totp alice
 ```
 
+## Testing
+
+Two test suites cover the project:
+
+| Suite | Location | What it checks |
+| --- | --- | --- |
+| Web manager unit tests | `web-manager/tests/` | Configuration management (create, edit, enable/disable, delete, certificates, backup/restore, the disabled-domains file), authentication (setup, login, TOTP, user management) and the `/manager` pages. Runs with pytest against temporary folders and a temporary database; nothing under `/app` or `/etc/nginx` is touched. |
+| Reverse proxy routing tests | `reverse-proxy/tests/test_routing.sh` | Builds the reverse-proxy image, starts it with an enabled, a disabled and an unknown domain, and checks the healthcheck, the 503 page and which certificate each domain serves. Requires Docker. |
+
+### Running the tests locally
+
+Set up a virtual environment once:
+
+```bash
+cd web-manager
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt pytest
+```
+
+Then, from `web-manager/`:
+
+```bash
+.venv/bin/pytest                                  # all unit tests
+.venv/bin/pytest tests/test_auth.py               # one file
+.venv/bin/pytest tests/test_manager.py::test_get_cert_expiry   # one test
+.venv/bin/pytest -k unavailable                   # tests whose name matches
+```
+
+Add `-v` to list each test, or `-x` to stop at the first failure.
+
+The routing tests run from the repository root:
+
+```bash
+./reverse-proxy/tests/test_routing.sh
+```
+
+### Continuous integration
+
+The **Tests** workflow (`.github/workflows/tests.yml`) runs both suites with GitHub Actions:
+
+- on every push to any branch
+- on every pull request (results appear as checks on the PR)
+- manually: **Actions** → **Tests** → **Run workflow**, or `gh workflow run tests.yml`
+
+Results are in the repository's **Actions** tab; open a run, then a job, to see each test's output.
+
 ## Releasing
 
 Docker images are published automatically via GitHub Actions when a tag matching `v*` is pushed:
@@ -153,7 +203,7 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 
-This builds and pushes `ghcr.io/clubnix/rpm-rp` and `ghcr.io/clubnix/rpm-web` with the tag and `latest`.
+The workflow first runs the test suites; if any test fails, nothing is published. It then builds and pushes `ghcr.io/clubnix/rpm-rp` and `ghcr.io/clubnix/rpm-web` with the tag and `latest`.
 
 ## License
 

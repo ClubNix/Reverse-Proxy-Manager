@@ -120,6 +120,24 @@ def test_login_and_logout(client):
     assert client.get('/').status_code == 302
 
 
+@pytest.mark.parametrize('next_url, expected', [
+    ('/manager/manage', '/manager/manage'),
+    ('https://evil.example/', '/'),
+    ('//evil.example/', '/'),
+    ('/\\evil.example/', '/'),
+    ('http://localhost\\@evil.example/', '/'),
+    ('/\t/evil.example/', '/'),
+])
+def test_login_redirect_only_follows_local_next(client, next_url, expected):
+    add_user('admin')
+
+    response = client.post('/auth/login', data={'username': 'admin', 'password': 'secret',
+                                                'next': next_url})
+
+    assert response.status_code == 302
+    assert response.headers['Location'] == expected
+
+
 def test_login_with_totp_requires_valid_code(client):
     secret = pyotp.random_base32()
     add_user('admin', totp_secret=secret)

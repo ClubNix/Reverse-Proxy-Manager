@@ -178,7 +178,7 @@
                 <span>{% if status.enabled %}Disable{% else %}Enable{% endif %}</span>
             </button>
             <button type="submit" name="action" value="delete" class="btn-action btn-action--delete" title="Delete permanently"
-                    onclick="return confirm('Permanently delete &quot;{{ item }}&quot;? This cannot be undone.')">
+                    data-confirm="Permanently delete &quot;{{ item }}&quot;? This cannot be undone.">
                 <i class="bi bi-trash3"></i><span>Delete</span>
             </button>
         </form>
@@ -204,6 +204,13 @@ document.querySelectorAll('.panel-close').forEach(function (btn) {
         document.querySelectorAll('.conf-row--active').forEach(function (row) {
             row.classList.remove('conf-row--active');
         });
+    });
+});
+
+// ── Delete confirmation (text read from data-confirm, never evaluated) ──
+document.querySelectorAll('button[data-confirm]').forEach(function (btn) {
+    btn.addEventListener('click', function (e) {
+        if (!confirm(btn.dataset.confirm)) e.preventDefault();
     });
 });
 

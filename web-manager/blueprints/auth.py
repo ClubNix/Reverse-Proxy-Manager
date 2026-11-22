@@ -98,7 +98,7 @@ def login():
                                                       or request.args.get('next'))
                 return redirect(url_for('auth.totp'))
             login_user(User(data), remember=True)
-            next_url = request.form.get('next') or request.args.get('next') or url_for('index')
+            next_url = _safe_next_url(request.form.get('next') or request.args.get('next'))
             return redirect(next_url)
         error = 'Invalid username or password.'
 

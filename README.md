@@ -30,14 +30,25 @@ services:
   reverse-proxy:
     container_name: reverse-proxy
     image: ghcr.io/clubnix/rpm-rp:latest
+    environment:
+      # Serve the web manager on its own domain over 443, e.g. rp.example.local
+      # (put a certificate for it in the manager-ssl volume). Empty: port 8443 only.
+      - MANAGER_DOMAIN=
+      # Names/IPs (comma-separated) put in the self-signed web manager certificate
+      - MANAGER_HOSTNAMES=localhost
     ports:
       - 80:80
       - 443:443
+      # Web manager over HTTPS (proxied to web-manager:5000 internally)
+      - 8443:8443
     volumes:
       - logs:/var/log/nginx
       - conf:/etc/nginx/conf.d
       - certs:/etc/nginx/certs
       - scripts:/opt/scripts
+      - manager-ssl:/etc/nginx/manager-ssl
+    depends_on:
+      - web-manager
     restart: unless-stopped
 
   web-manager:
@@ -50,8 +61,9 @@ services:
       - SSL_ORGANIZATION_GLOBAL=isnubi
       - SSL_ORGANIZATION_UNIT=Homelab
       - SSL_DAYS=365
-    ports:
-      - 5000:5000
+    # Not published on the host: reach it through the reverse proxy on :8443.
+    expose:
+      - 5000
     volumes:
       - logs:/app/nginx/logs
       - conf:/app/nginx/conf.d
@@ -67,13 +79,14 @@ volumes:
   certs:
   scripts:
   data:
+  manager-ssl:
 ```
 
 ```bash
 docker compose up -d
 ```
 
-The web manager is available at [http://localhost:5000](http://localhost:5000).
+The web manager is available at [https://localhost:8443](https://localhost:8443). It is served over HTTPS by the bundled nginx and is not published on the host directly; see [Web manager HTTPS](#web-manager-https).
 
 On first visit you will be redirected to the setup page to create the admin account.
 
@@ -111,12 +124,48 @@ Environment variables for the `web-manager` service:
 | `scripts` | Reload and validation scripts (shared with reverse-proxy) |
 | `./logs` | Web manager application logs (host bind-mount) |
 | `data` | Persistent data: SQLite database, Flask secret key |
+| `manager-ssl` | Web manager HTTPS certificate and key (reverse-proxy) |
+
+### Web manager HTTPS
+
+The web manager only listens on the internal compose network; the `reverse-proxy` container serves it over HTTPS and forwards requests to `web-manager:5000`. Passwords, TOTP codes, session cookies and uploaded keys never cross the network in clear text, and the session cookies are marked `Secure`, so the manager cannot be used over plain HTTP.
+
+It is reachable in two ways:
+
+- **`https://<host>:8443`**, always on.
+- **`https://<MANAGER_DOMAIN>/`** on the normal HTTPS port, when `MANAGER_DOMAIN` is set on the `reverse-proxy` service (for example `MANAGER_DOMAIN=rp.example.local`; several names can be comma-separated). Port 80 for that name redirects to HTTPS. Point the name at the Docker host in your DNS or hosts file. This block is generated at container start, outside `conf.d`, so it never appears in the services list.
+
+Both use the certificate in the `manager-ssl` volume (`manager.crt` and `manager.key`). To use a certificate from your own PKI, copy it there (put the full chain in `manager.crt` if you use an intermediate CA) and restart the reverse proxy:
+
+```bash
+docker cp rp.example.local.crt reverse-proxy:/etc/nginx/manager-ssl/manager.crt
+docker cp rp.example.local.key reverse-proxy:/etc/nginx/manager-ssl/manager.key
+docker restart reverse-proxy
+```
+
+If no certificate is there, a self-signed one is generated on first start for the names in `MANAGER_HOSTNAMES` and `MANAGER_DOMAIN` (`127.0.0.1` is always included). Before trusting it, compare its fingerprint with the one in the logs:
+
+```bash
+docker logs reverse-proxy 2>&1 | grep fingerprint
+```
+
+To regenerate it (for example after changing those names), delete both files and restart.
+
+> Upgrading from a version that published port `5000`: if you created a service entry that proxied the manager's domain to `<host>:5000`, delete it from the services list and set `MANAGER_DOMAIN` to that domain instead, with its certificate copied into `manager-ssl`. Otherwise use `https://<host>:8443`.
 
 ## Authentication
 
 ### First run
 
-Navigate to [http://localhost:5000](http://localhost:5000). You will be redirected to `/auth/setup` to create the first (admin) account.
+Navigate to [https://localhost:8443](https://localhost:8443). You will be redirected to `/auth/setup` to create the first (admin) account.
+
+The setup page asks for a setup token, so that nobody else who can reach the manager can claim the admin account first. The token is written to the web manager logs each time the setup page is opened:
+
+```bash
+docker logs web-manager 2>&1 | grep "setup token"
+```
+
+Alternatively, create the first account with the CLI (see below).
 
 ### User management — web UI
 

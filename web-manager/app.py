@@ -2,6 +2,7 @@ from datetime import timedelta
 
 from flask import Flask, render_template
 from flask_login import login_required
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from blueprints import manager
 from blueprints.auth import bp as auth_bp, login_manager
@@ -10,6 +11,14 @@ from db import init_db, get_or_create_secret_key
 app = Flask(__name__)
 app.secret_key = get_or_create_secret_key()
 app.config['REMEMBER_COOKIE_DURATION'] = timedelta(days=30)
+# The manager is served over HTTPS by the bundled nginx (port 8443), which
+# is the only client that can reach it, so trust its forwarded headers and
+# keep the session cookies off plain HTTP.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+app.config['SESSION_COOKIE_SECURE'] = True
+app.config['REMEMBER_COOKIE_SECURE'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['REMEMBER_COOKIE_SAMESITE'] = 'Lax'
 
 login_manager.init_app(app)
 

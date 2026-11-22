@@ -1,12 +1,30 @@
 """Tests for the /manager pages, going through Flask like a browser would."""
 import os
+import re
 
 import pytest
 
 
+def csrf_token_from(client, url='/manager/create'):
+    """Read the CSRF token from the hidden field of a rendered manager form."""
+    page = client.get(url).get_data(as_text=True)
+    return re.search(r'name="csrf_token" value="([^"]+)"', page).group(1)
+
+
 @pytest.fixture
 def web(logged_in_client, fake_nginx):
-    """Logged-in client whose actions write into the temporary nginx folders."""
+    """Logged-in client whose actions write into the temporary nginx folders.
+
+    Like a browser submitting the manager's forms, every POST carries the
+    CSRF token rendered in those forms.
+    """
+    token = csrf_token_from(logged_in_client)
+    post = logged_in_client.post
+
+    def post_with_csrf_token(*args, data=None, **kwargs):
+        return post(*args, data={**(data or {}), 'csrf_token': token}, **kwargs)
+
+    logged_in_client.post = post_with_csrf_token
     return logged_in_client
 
 
@@ -126,3 +144,64 @@ def test_restore_rejects_non_tar_gz(web):
         'backup_file': (BytesIO(b'x'), 'backup.zip')}, content_type='multipart/form-data')
 
     assert b'File must be a .tar.gz archive' in response.data
+
+
+# ── CSRF protection ───────────────────────────────────────────────────
+
+CREATE_FORM = {'domain': 'app.example.com', 'server': '10.0.0.5:8080', 'description': 'My app',
+               'service_type': 'http', 'allow_origin': ''}
+
+
+@pytest.mark.parametrize('token', [None, '', 'forged-token'])
+def test_create_without_valid_csrf_token_is_rejected(logged_in_client, fake_nginx, token):
+    csrf_token_from(logged_in_client)  # the session holds a real token
+    data = CREATE_FORM if token is None else {**CREATE_FORM, 'csrf_token': token}
+
+    response = logged_in_client.post('/manager/create', data=data)
+
+    assert response.status_code == 400
+    assert os.listdir(fake_nginx / 'conf.d') == []
+
+
+@pytest.mark.parametrize('data', [
+    {'conf_name': 'app.example.com', 'new_conf': 'server { listen 80; }'},
+    {'action': 'toggle', 'conf': 'app.example.com'},
+    {'action': 'delete', 'conf': 'app.example.com'},
+])
+@pytest.mark.parametrize('token', [None, 'forged-token'])
+def test_manage_without_valid_csrf_token_is_rejected(logged_in_client, fake_nginx, data, token):
+    real_token = csrf_token_from(logged_in_client)
+    logged_in_client.post('/manager/create', data={**CREATE_FORM, 'csrf_token': real_token})
+    conf = fake_nginx / 'conf.d' / 'app.example.com.conf'
+    original = conf.read_text()
+    if token is not None:
+        data = {**data, 'csrf_token': token}
+
+    response = logged_in_client.post('/manager/manage', data=data)
+
+    assert response.status_code == 400
+    assert conf.read_text() == original
+
+
+def test_restore_without_csrf_token_is_rejected(logged_in_client, fake_nginx):
+    from io import BytesIO
+    csrf_token_from(logged_in_client)
+
+    response = logged_in_client.post('/manager/backup/restore', data={
+        'backup_file': (BytesIO(b'x'), 'backup.tar.gz')}, content_type='multipart/form-data')
+
+    assert response.status_code == 400
+
+
+def test_manager_forms_carry_the_session_csrf_token(web):
+    create(web)
+    token = csrf_token_from(web)
+
+    for url in ('/manager/manage', '/manager/backup'):
+        assert csrf_token_from(web, url) == token
+
+
+def test_anonymous_post_still_redirects_to_login(client):
+    response = client.post('/manager/manage', data={'action': 'delete', 'conf': 'app.example.com'})
+
+    assert response.status_code == 302

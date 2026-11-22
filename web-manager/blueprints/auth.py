@@ -1,19 +1,35 @@
+import hashlib
+import hmac
 import io
-from datetime import timedelta
+import secrets
+from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit
 
 import pyotp
 import qrcode
 from flask import (Blueprint, render_template, request, redirect,
-                   url_for, session, send_file, abort)
+                   url_for, session, send_file, abort, current_app)
 from flask_login import (LoginManager, UserMixin, login_user, logout_user,
                          login_required, current_user)
 from werkzeug.security import generate_password_hash, check_password_hash
 
 from db import (user_count, get_user, get_user_by_id, get_all_users,
-                create_user, update_password, set_totp_secret, delete_user)
+                create_user, create_first_user, update_password,
+                set_totp_secret, delete_user,
+                create_totp_pending, get_totp_pending, set_totp_pending_first_code,
+                delete_totp_pending, reserve_totp_attempt, release_totp_attempt)
 
 bp = Blueprint('auth', __name__, url_prefix='/auth')
 login_manager = LoginManager()
+
+# Seconds a password-verified login has to enter its TOTP code.
+TOTP_PENDING_TTL = 300
+# Single-code TOTP attempts per account and per window, shared by every
+# pending login of that account. Once they are used up, a login still
+# succeeds, but only with two correct codes from two different time steps,
+# so someone else's failed guesses cannot lock the account owner out.
+TOTP_MAX_ATTEMPTS = 5
+TOTP_ATTEMPT_WINDOW = 900
 
 
 class User(UserMixin):
@@ -41,6 +57,23 @@ def unauthorized():
     return redirect(url_for('auth.login', next=request.path))
 
 
+def _safe_next_url(target) -> str:
+    """Return target if it is a same-site relative path, else the index URL."""
+    fallback = url_for('index')
+    if not isinstance(target, str) or not target:
+        return fallback
+    # Browsers treat '\' like '/' and drop tabs/newlines, which could turn
+    # '/\evil.com' or '/\t/evil.com' into the external '//evil.com'.
+    if '\\' in target or any(ord(c) < 0x20 or ord(c) == 0x7f for c in target):
+        return fallback
+    if not target.startswith('/') or target.startswith('//'):
+        return fallback
+    parts = urlsplit(target)
+    if parts.scheme or parts.netloc:
+        return fallback
+    return target
+
+
 # ── Login / logout ────────────────────────────────────────────────────
 
 @bp.route('/login', methods=['GET', 'POST'])
@@ -57,35 +90,74 @@ def login():
         data = get_user(username)
         if data and check_password_hash(data['password_hash'], password):
             if data['totp_secret']:
-                session['totp_pending'] = data['id']
-                session['totp_next'] = (request.form.get('next')
-                                        or request.args.get('next')
-                                        or url_for('index'))
+                token = secrets.token_urlsafe(32)
+                create_totp_pending(token, data['id'],
+                                    datetime.now(timezone.utc).timestamp(), TOTP_PENDING_TTL)
+                session['totp_pending'] = token
+                session['totp_next'] = _safe_next_url(request.form.get('next')
+                                                      or request.args.get('next'))
                 return redirect(url_for('auth.totp'))
             login_user(User(data), remember=True)
-            next_url = request.form.get('next') or request.args.get('next') or url_for('index')
+            next_url = _safe_next_url(request.form.get('next') or request.args.get('next'))
             return redirect(next_url)
         error = 'Invalid username or password.'
 
     return render_template('login.html', error=error, next=request.args.get('next', ''))
 
 
+def _finish_totp_login(token: str, data: dict):
+    delete_totp_pending(token)
+    session.pop('totp_pending', None)
+    next_url = _safe_next_url(session.pop('totp_next', None))
+    login_user(User(data), remember=True)
+    return redirect(next_url)
+
+
 @bp.route('/totp', methods=['GET', 'POST'])
 def totp():
-    user_id = session.get('totp_pending')
-    if not user_id:
+    token = session.get('totp_pending')
+    when = datetime.now(timezone.utc)
+    pending = (get_totp_pending(token, when.timestamp(), TOTP_PENDING_TTL)
+               if isinstance(token, str) else None)
+    if not pending:
+        session.pop('totp_pending', None)
         return redirect(url_for('auth.login'))
 
     error = None
     if request.method == 'POST':
         code = request.form.get('code', '').strip()
-        data = get_user_by_id(user_id)
-        if data and data['totp_secret'] and pyotp.TOTP(data['totp_secret']).verify(code):
-            session.pop('totp_pending', None)
-            next_url = session.pop('totp_next', url_for('index'))
-            login_user(User(data), remember=True)
-            return redirect(next_url)
-        error = 'Invalid code. Please try again.'
+        data = get_user_by_id(pending['user_id'])
+        if not (data and data['totp_secret']):
+            error = 'Invalid code. Please try again.'
+        else:
+            otp = pyotp.TOTP(data['totp_secret'])
+            step = otp.timecode(when)
+            if reserve_totp_attempt(data['id'], TOTP_MAX_ATTEMPTS, TOTP_ATTEMPT_WINDOW,
+                                    when.timestamp()):
+                if otp.verify(code, for_time=when):
+                    release_totp_attempt(data['id'])
+                    return _finish_totp_login(token, data)
+                error = 'Invalid code. Please try again.'
+            # The account's budget is used up: this login needs two codes from
+            # two different time steps. The first is recorded without saying
+            # whether it was right; the second is checked once, together with it.
+            elif pending['first_step'] is None and set_totp_pending_first_code(
+                    token, step, otp.verify(code, for_time=when)):
+                error = ('Too many failed attempts on this account. Wait for your '
+                         'authenticator to show a new code, then enter it.')
+            else:
+                pending = get_totp_pending(token, when.timestamp(), TOTP_PENDING_TTL)
+                if (pending and pending['first_step'] is not None
+                        and step <= pending['first_step']):
+                    error = 'Wait for your authenticator to show a new code, then enter it.'
+                elif pending and delete_totp_pending(token):
+                    if pending['first_ok'] and otp.verify(code, for_time=when):
+                        return _finish_totp_login(token, data)
+                    session.pop('totp_pending', None)
+                    error = 'Invalid code. Please sign in again.'
+                else:
+                    session.pop('totp_pending', None)
+                    return redirect(url_for('auth.login'))
 
     return render_template('totp.html', error=error)
 
@@ -99,6 +171,19 @@ def logout():
 
 # ── First-run setup ───────────────────────────────────────────────────
 
+def setup_token() -> str:
+    """Secret required to complete first-run setup.
+
+    Derived from the app secret key, so every worker process agrees on it, and
+    only ever written to the server logs, so only the operator can read it.
+    """
+    key = current_app.secret_key
+    if isinstance(key, str):
+        key = key.encode()
+    return hmac.new(key, b'reverse-proxy-manager first-run setup',
+                    hashlib.sha256).hexdigest()
+
+
 @bp.route('/setup', methods=['GET', 'POST'])
 def setup():
     if user_count() > 0:
@@ -106,18 +191,24 @@ def setup():
 
     error = None
     if request.method == 'POST':
+        token = request.form.get('setup_token', '').strip()
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
         confirm = request.form.get('confirm_password', '')
-        if not username or not password:
+        if not hmac.compare_digest(token.encode(), setup_token().encode()):
+            error = 'Invalid setup token.'
+        elif not username or not password:
             error = 'Username and password are required.'
         elif not password:
             error = 'Password is required.'
         elif password != confirm:
             error = 'Passwords do not match.'
         else:
-            create_user(username, generate_password_hash(password))
+            create_first_user(username, generate_password_hash(password))
             return redirect(url_for('auth.login'))
+    else:
+        current_app.logger.warning(
+            'No user exists yet. First-run setup token: %s', setup_token())
 
     return render_template('setup.html', error=error)
 
@@ -203,6 +294,26 @@ def totp_qr():
     return send_file(buf, mimetype='image/png')
 
 
+# ── CSRF protection ───────────────────────────────────────────────────
+
+def get_csrf_token() -> str:
+    """Return the session's CSRF token, creating it on first use."""
+    token = session.get('csrf_token')
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session['csrf_token'] = token
+    return token
+
+
+def check_csrf_token() -> None:
+    """Abort with 400 unless the form carries the session's CSRF token."""
+    expected = session.get('csrf_token')
+    submitted = request.form.get('csrf_token', '')
+    if not expected or not hmac.compare_digest(expected.encode(),
+                                               submitted.encode()):
+        abort(400)
+
+
 # ── User management ───────────────────────────────────────────────────
 
 @bp.route('/users', methods=['GET', 'POST'])
@@ -212,6 +323,7 @@ def users():
     success = False
 
     if request.method == 'POST':
+        check_csrf_token()
         action = request.form.get('action')
 
         if action == 'add':
@@ -239,4 +351,5 @@ def users():
                     success = True
 
     return render_template('users.html', users=get_all_users(),
-                           message=message, success=success)
+                           message=message, success=success,
+                           csrf_token=get_csrf_token())

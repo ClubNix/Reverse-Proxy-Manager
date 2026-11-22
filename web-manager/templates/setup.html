@@ -14,7 +14,8 @@
         <div class="auth-header">
             <img src="{{ url_for('static', filename='album/logo.png') }}" alt="Reverse Proxy Manager" class="auth-logo">
             <h1 class="auth-title">Create admin account</h1>
-            <p class="auth-subtitle">No users exist yet. Set up the first account to get started.</p>
+            <p class="auth-subtitle">No users exist yet. Set up the first account to get started.
+                The setup token is printed in the web manager logs (<code>docker logs web-manager</code>).</p>
         </div>
 
         {% if error %}
@@ -25,9 +26,14 @@
 
         <form method="POST" class="auth-form">
             <div class="field">
+                <label for="setup_token">Setup token</label>
+                <input type="text" id="setup_token" name="setup_token"
+                       autocomplete="off" required autofocus>
+            </div>
+            <div class="field">
                 <label for="username">Username</label>
                 <input type="text" id="username" name="username"
-                       autocomplete="username" required autofocus
+                       autocomplete="username" required
                        placeholder="admin">
             </div>
             <div class="field">

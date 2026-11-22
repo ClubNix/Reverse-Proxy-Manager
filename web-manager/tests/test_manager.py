@@ -140,6 +140,29 @@ def test_remove_conf_deletes_conf_certificate_and_logs(rpm):
     assert not os.path.exists(os.path.join(rpm.app_log_path, 'app.example.com'))
 
 
+@pytest.mark.parametrize('name', ['', '../outside', '../../outside', 'a/../../outside', '/outside'])
+def test_remove_conf_rejects_paths_outside_nginx_folders(rpm, name):
+    outside = os.path.join(rpm.app_nginx_path, os.pardir, 'outside')
+    os.makedirs(outside)
+    open(os.path.join(outside, 'users.db'), 'w').close()
+
+    with pytest.raises(ValueError):
+        rpm.remove_conf(name)
+
+    assert os.path.exists(os.path.join(outside, 'users.db'))
+
+
+@pytest.mark.parametrize('name', ['.', '..'])
+def test_remove_conf_never_deletes_the_logs_folder_or_its_parent(rpm, name):
+    os.makedirs(os.path.join(rpm.app_log_path, 'other.example.com'))
+    write_conf(rpm, 'other.example.com')
+
+    rpm.remove_conf(name)
+
+    assert os.path.isdir(os.path.join(rpm.app_log_path, 'other.example.com'))
+    assert rpm.get_conf_list() == ['other.example.com']
+
+
 # ── Parsing ───────────────────────────────────────────────────────────
 
 def test_get_conf_infos_and_clone_parse_created_conf(rpm):

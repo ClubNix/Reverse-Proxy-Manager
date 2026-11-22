@@ -47,6 +47,7 @@
             This will overwrite all current configurations, certificates and keys.
         </div>
         <form method="POST" action="{{ url_for('manager.backup_restore') }}" enctype="multipart/form-data" class="restore-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="field">
                 <label for="backup_file">Backup archive</label>
                 <input type="file" id="backup_file" name="backup_file" accept=".tar.gz,.gz" class="file-input" required>

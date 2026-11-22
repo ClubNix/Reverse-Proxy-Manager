@@ -118,6 +118,14 @@ Environment variables for the `web-manager` service:
 
 Navigate to [http://localhost:5000](http://localhost:5000). You will be redirected to `/auth/setup` to create the first (admin) account.
 
+The setup page asks for a setup token, so that nobody else who can reach port 5000 can claim the admin account first. The token is written to the web manager logs each time the setup page is opened:
+
+```bash
+docker logs web-manager 2>&1 | grep "setup token"
+```
+
+Alternatively, create the first account with the CLI (see below).
+
 ### User management — web UI
 
 The **Users** page (navbar link) lists all accounts. The admin account (first user created) can add and delete other users.

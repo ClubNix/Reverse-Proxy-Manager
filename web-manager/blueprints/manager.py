@@ -1,8 +1,10 @@
 import flask
-from flask import Blueprint, render_template, request, send_from_directory, jsonify
-from flask_login import login_required
+from flask import Blueprint, render_template, request, send_from_directory, jsonify, session, abort
+from flask_login import login_required, current_user
+import hmac
 import logging
 import os
+import secrets
 import subprocess
 import socket
 import tempfile
@@ -132,6 +134,16 @@ class ReverseProxyManager:
         return True
 
     # ── Config file helpers ───────────────────────────────────────────
+
+    @staticmethod
+    def is_safe_name(name: str) -> bool:
+        """True if `name` can be used as a single path component.
+
+        Rejects anything that would make a name-derived path such as
+        `{folder}/{name}.crt` or `{folder}/{name}/` leave `folder`.
+        """
+        return (name not in ('', '.', '..')
+                and not any(c in name for c in ('/', '\\', '\0')))
 
     def _conf_path(self, conf_name: str) -> str:
         """Return the actual path of the conf file (enabled or disabled)."""
@@ -313,6 +325,11 @@ class ReverseProxyManager:
         logger.info(f"SSL certificate for {domain} generated")
 
     def remove_conf(self, conf_name: str) -> None:
+        # conf_name comes from the request: it must be a bare name, otherwise
+        # path separators ('../') would let the deletions below escape the
+        # conf.d, certs and logs folders.
+        if not conf_name or os.path.basename(conf_name) != conf_name:
+            raise ValueError(f'Invalid configuration name {conf_name!r}')
         try:
             os.remove(self._conf_path(conf_name))
         except FileNotFoundError:
@@ -321,7 +338,11 @@ class ReverseProxyManager:
             p = f'{self.app_ssl_path}/{conf_name}{ext}'
             if os.path.exists(p):
                 os.remove(p)
-        shutil.rmtree(f'{self.app_log_path}/{conf_name}', ignore_errors=True)
+        # Only delete a folder that really sits directly inside the logs folder
+        # ('.' or '..' would resolve to the logs folder itself or its parent).
+        log_dir = f'{self.app_log_path}/{conf_name}'
+        if os.path.dirname(os.path.realpath(log_dir)) == os.path.realpath(self.app_log_path):
+            shutil.rmtree(log_dir, ignore_errors=True)
         logger.info(f'Configuration {conf_name} removed')
         self.reload_nginx()
 
@@ -483,6 +504,38 @@ class ReverseProxyManager:
         return tmp_cert_path, tmp_key_path
 
 
+# ── CSRF protection ───────────────────────────────────────────────────
+
+def get_csrf_token() -> str:
+    """Return the CSRF token bound to the current session, creating it if needed."""
+    token = session.get('csrf_token')
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session['csrf_token'] = token
+    return token
+
+
+@bp.context_processor
+def inject_csrf_token() -> dict:
+    return {'csrf_token': get_csrf_token}
+
+
+@bp.before_request
+def check_csrf_token() -> None:
+    """Reject state-changing requests that do not carry the session's CSRF token.
+
+    Anonymous requests are left to @login_required, which redirects them to the login page.
+    """
+    if request.method in ('GET', 'HEAD', 'OPTIONS') or not current_user.is_authenticated:
+        return None
+    expected = session.get('csrf_token', '')
+    submitted = request.form.get('csrf_token', '')
+    if not expected or not hmac.compare_digest(expected.encode(), submitted.encode()):
+        logger.warning(f'Rejected {request.method} {request.path!r}: missing or invalid CSRF token')
+        abort(400, description='Missing or invalid CSRF token.')
+    return None
+
+
 # ── Routes ────────────────────────────────────────────────────────────
 
 @bp.route('/manage', methods=['GET', 'POST'])
@@ -497,6 +550,9 @@ def manage() -> str | flask.Response:
         if 'new_conf' in request.form:
             conf_name = request.form['conf_name']
             new_conf = request.form['new_conf']
+            if conf_name not in conf_list:
+                return render_template('manage.html', conf_list=conf_list, conf_status=conf_status,
+                                       message='Configuration not found', success=False)
             cert_path, key_path = handler.handle_cert_key_upload(conf_name, request)
             handler.edit_conf(conf_name, new_conf, cert_path, key_path)
             check, status = handler.reload_nginx()
@@ -519,7 +575,11 @@ def manage() -> str | flask.Response:
                                    conf_infos=conf_infos)
 
         elif action == 'delete':
-            handler.remove_conf(conf_name)
+            try:
+                handler.remove_conf(conf_name)
+            except ValueError:
+                return render_template('manage.html', conf_list=conf_list, conf_status=conf_status,
+                                       message='Invalid configuration name', success=False)
             conf_list = handler.get_conf_list()
             conf_status = handler.get_all_conf_status()
             return render_template('manage.html', conf_list=conf_list, conf_status=conf_status,
@@ -570,13 +630,15 @@ def create() -> str:
             return render_template('create.html', message='Domain and server address are required', success=False)
         if allow_origin == '':
             allow_origin = '*'
-
-        cert_path, key_path = handler.handle_cert_key_upload(domain, request)
+        if not handler.is_safe_name(domain):
+            return render_template('create.html', message='Invalid domain name', success=False)
 
         if domain in handler.get_conf_list():
             return render_template('create.html', message='Domain already exists', success=False)
         if not handler.address_check(server):
             return render_template('create.html', message='Invalid server address', success=False)
+
+        cert_path, key_path = handler.handle_cert_key_upload(domain, request)
 
         handler.create_conf(domain, server, description, service_type, allow_origin, cert_path, key_path)
         check, status = handler.reload_nginx()

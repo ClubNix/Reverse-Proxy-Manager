@@ -93,6 +93,7 @@
         <button type="button" class="panel-close" aria-label="Close"><i class="bi bi-x-lg"></i></button>
     </div>
     <form method="POST" enctype="multipart/form-data" class="edit-panel-body">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="edit-field">
             <label class="edit-label" for="new_conf">Configuration</label>
             <textarea id="new_conf" name="new_conf" class="edit-textarea">{{ conf_edit }}</textarea>
@@ -157,6 +158,7 @@
             {% endif %}
         </div>
         <form method="POST" class="conf-row-actions">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="conf" value="{{ item }}">
             <button type="submit" name="action" value="view" class="btn-action btn-action--view" title="View details">
                 <i class="bi bi-eye"></i><span>View</span>

@@ -16,8 +16,9 @@ RUN rm -rf /var/cache/apk/*
 
 # Create directories
 RUN mkdir -p /opt && \
-    mkdir -p /run/nginx \
-    mkdir -p $NGINX_SSL_DIR
+    mkdir -p /run/nginx && \
+    mkdir -p $NGINX_SSL_DIR && \
+    mkdir -p $NGINX_DIR/manager.d
 
 # Backup default nginx configuration \
 RUN mv $NGINX_DIR/nginx.conf $NGINX_DIR/nginx.conf.bak
@@ -28,6 +29,8 @@ COPY ./conf/unavailable.inc $NGINX_DIR/unavailable.inc
 COPY ./conf/manager.sh /opt/manager.sh
 COPY ./conf/watch_reload_nginx.sh /opt/scripts/watch_reload_nginx.sh
 COPY ./conf/watch_conf_check.sh /opt/scripts/watch_conf_check.sh
+COPY ./conf/manager_ssl.sh /opt/manager_ssl.sh
+COPY ./conf/manager_proxy.inc $NGINX_DIR/manager_proxy.inc
 
 # Fallback self-signed certificate for the catch-all (unavailable) server
 RUN mkdir -p $NGINX_DIR/default-ssl && \
@@ -47,6 +50,7 @@ RUN sed -i "s|\$NGINX_CONF_DIR_REPLACE|$NGINX_CONF_DIR|g" /opt/manager.sh && \
     sed -i "s|\$NGINX_SSL_DIR_REPLACE|$NGINX_SSL_DIR|g" /opt/manager.sh && \
     sed -i "s|\$NGINX_LOG_DIR_REPLACE|$NGINX_LOG_DIR|g" /opt/manager.sh && \
     chmod +x /opt/manager.sh && \
+    chmod +x /opt/manager_ssl.sh && \
     chmod +x /opt/scripts/watch_reload_nginx.sh && \
     chmod +x /opt/scripts/watch_conf_check.sh && \
     touch /opt/scripts/reload_nginx && \
@@ -59,8 +63,8 @@ WORKDIR /opt
 # Healthcheck
 HEALTHCHECK --interval=30s --timeout=3s CMD curl --fail http://localhost/health.html || exit 1
 
-# Expose ports
-EXPOSE 80 443
+# Expose ports (8443: web manager over HTTPS)
+EXPOSE 80 443 8443
 
-# Run nginx
-CMD ["/bin/bash", "-c", "/opt/scripts/watch_reload_nginx.sh & /opt/scripts/watch_conf_check.sh & nginx -g 'daemon off;'"]
+# Run nginx (after making sure the web manager certificate exists)
+CMD ["/bin/bash", "-c", "/opt/manager_ssl.sh && { /opt/scripts/watch_reload_nginx.sh & /opt/scripts/watch_conf_check.sh & nginx -g 'daemon off;'; }"]

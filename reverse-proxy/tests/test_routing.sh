@@ -139,6 +139,17 @@ else
     fail "shows the unavailable page"
 fi
 
+echo "Web manager listener (:8443):"
+# No web-manager container runs here, so the proxied request must fail with
+# 502; what matters is that nginx serves TLS on 8443 and starts without it.
+check "https proxies to the manager (502 without it)" 502 \
+    "$(docker exec "$CONTAINER" curl -sk -o /dev/null -w '%{http_code}' https://127.0.0.1:8443/)"
+check "plain http on 8443 redirects to https" 301 \
+    "$(docker exec "$CONTAINER" curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8443/)"
+check "serves the manager certificate" reverse-proxy-manager \
+    "$(docker exec "$CONTAINER" sh -c "echo | openssl s_client -connect 127.0.0.1:8443 2>/dev/null \
+        | openssl x509 -noout -subject 2>/dev/null" | sed -n 's/.*CN *= *//p')"
+
 echo
 if [ "$FAILURES" -eq 0 ]; then
     echo "All routing checks passed."

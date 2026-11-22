@@ -2,14 +2,25 @@ services:
   reverse-proxy:
     container_name: reverse-proxy
     image: ghcr.io/clubnix/rpm-rp:latest
+    environment:
+      # Serve the web manager on its own domain over 443, e.g. rp.example.local
+      # (put a certificate for it in the manager-ssl volume). Empty: port 8443 only.
+      - MANAGER_DOMAIN=
+      # Names/IPs (comma-separated) put in the self-signed web manager certificate
+      - MANAGER_HOSTNAMES=localhost
     ports:
       - 80:80
       - 443:443
+      # Web manager over HTTPS (proxied to web-manager:5000 internally)
+      - 8443:8443
     volumes:
       - logs:/var/log/nginx
       - conf:/etc/nginx/conf.d
       - certs:/etc/nginx/certs
       - scripts:/opt/scripts
+      - manager-ssl:/etc/nginx/manager-ssl
+    depends_on:
+      - web-manager
     restart: unless-stopped
 
   web-manager:
@@ -22,8 +33,9 @@ services:
       - SSL_ORGANIZATION_GLOBAL=isnubi
       - SSL_ORGANIZATION_UNIT=Homelab
       - SSL_DAYS=365
-    ports:
-      - 5000:5000
+    # Not published on the host: reach it through the reverse proxy on :8443.
+    expose:
+      - 5000
     volumes:
       - logs:/app/nginx/logs
       - conf:/app/nginx/conf.d
@@ -39,3 +51,4 @@ volumes:
   certs:
   scripts:
   data:
+  manager-ssl:

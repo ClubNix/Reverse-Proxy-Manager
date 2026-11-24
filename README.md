@@ -172,6 +172,7 @@ Alternatively, create the first account with the CLI (see below).
 - Logins are tracked server side and last at most 30 days, even with "remember me" cookies.
 - Logging out ends that session everywhere its cookies might have been copied to.
 - Changing your password, or turning TOTP on or off, signs out all your other devices.
+- Turning TOTP on asks for your current password, and each TOTP code can only be used once.
 - After 10 failed password attempts from the same IP within 15 minutes, further logins from that IP are refused until the window ends. Other IPs are not affected, so nobody can lock you out of your account.
 
 After upgrading from a version without server-side sessions, everyone has to log in once more.

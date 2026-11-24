@@ -44,6 +44,11 @@ def init_db() -> None:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        # Last TOTP time step accepted for each account, so a code cannot be
+        # used twice (added after the users table, hence the migration).
+        columns = {row['name'] for row in conn.execute('PRAGMA table_info(users)')}
+        if 'totp_last_step' not in columns:
+            conn.execute('ALTER TABLE users ADD COLUMN totp_last_step INTEGER')
         # Password-verified logins waiting for their TOTP code. Kept server
         # side so that replaying the session cookie cannot rewind their state.
         conn.execute('''
@@ -133,7 +138,17 @@ def update_password(user_id: int, password_hash: str) -> None:
 
 def set_totp_secret(user_id: int, secret: str | None) -> None:
     with _connect() as conn:
-        conn.execute('UPDATE users SET totp_secret = ? WHERE id = ?', (secret, user_id))
+        conn.execute('UPDATE users SET totp_secret = ?, totp_last_step = NULL WHERE id = ?',
+                     (secret, user_id))
+
+
+def claim_totp_step(user_id: int, step: int) -> bool:
+    """Record a TOTP time step as used; False if it (or a later one) already was."""
+    with _connect() as conn:
+        cur = conn.execute('UPDATE users SET totp_last_step = ? WHERE id = ? '
+                           'AND (totp_last_step IS NULL OR totp_last_step < ?)',
+                           (step, user_id, step))
+        return cur.rowcount == 1
 
 
 def delete_user(user_id: int) -> None:

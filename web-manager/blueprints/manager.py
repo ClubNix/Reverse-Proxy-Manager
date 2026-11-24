@@ -568,6 +568,11 @@ def manage() -> str | flask.Response:
 
         action = request.form['action']
         conf_name = request.form['conf']
+        # conf_name comes from the request and is used to build file paths:
+        # only accept names of configurations that actually exist in conf.d.
+        if conf_name not in conf_list:
+            return render_template('manage.html', conf_list=conf_list, conf_status=conf_status,
+                                   message='Configuration not found', success=False)
 
         if action == 'view':
             conf_infos = handler.get_conf_infos(conf_name)

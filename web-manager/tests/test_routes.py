@@ -100,6 +100,19 @@ def test_delete_removes_conf(web, fake_nginx):
     assert os.listdir(fake_nginx / 'conf.d') == ['disabled.unavailable']
 
 
+@pytest.mark.parametrize('action', ['view', 'edit', 'logs', 'toggle', 'clone', 'delete'])
+def test_manage_actions_reject_unknown_conf(web, fake_nginx, action):
+    # A config outside conf.d that a traversal name would point at
+    outside = fake_nginx / 'outside.conf'
+    outside.write_text('server { listen 80; }\n')
+
+    response = web.post('/manager/manage', data={'action': action, 'conf': '../outside'})
+
+    assert b'Configuration not found' in response.data
+    assert outside.read_text() == 'server { listen 80; }\n'
+    assert not (fake_nginx / 'outside.conf.disabled').exists()
+
+
 def test_edit_saves_new_content(web, fake_nginx):
     create(web)
 

@@ -17,7 +17,9 @@ from db import (user_count, get_user, get_user_by_id, get_all_users,
                 create_user, create_first_user, update_password,
                 set_totp_secret, delete_user,
                 create_totp_pending, get_totp_pending, set_totp_pending_first_code,
-                delete_totp_pending, reserve_totp_attempt, release_totp_attempt)
+                delete_totp_pending, reserve_totp_attempt, release_totp_attempt,
+                create_auth_session, get_auth_session_user, delete_auth_session,
+                delete_user_auth_sessions, reserve_login_attempt, release_login_attempt)
 
 bp = Blueprint('auth', __name__, url_prefix='/auth')
 login_manager = LoginManager()
@@ -30,11 +32,22 @@ TOTP_PENDING_TTL = 300
 # so someone else's failed guesses cannot lock the account owner out.
 TOTP_MAX_ATTEMPTS = 5
 TOTP_ATTEMPT_WINDOW = 900
+# Seconds a login stays valid on the server, whatever the cookies say.
+# Matches REMEMBER_COOKIE_DURATION (30 days).
+SESSION_LIFETIME = 30 * 24 * 3600
+# Failed password logins allowed per client IP and per window. Counted per
+# client rather than per account, so nobody can lock someone else out.
+LOGIN_MAX_ATTEMPTS = 10
+LOGIN_ATTEMPT_WINDOW = 900
+# Checked when the username does not exist, so that the response takes as
+# long as a wrong password and does not reveal which usernames exist.
+_DUMMY_PASSWORD_HASH = generate_password_hash(secrets.token_urlsafe(16))
 
 
 class User(UserMixin):
-    def __init__(self, data: dict):
+    def __init__(self, data: dict, session_token: str | None = None):
         self.id = data['id']
+        self.session_token = session_token
         self.username = data['username']
         self.password_hash = data['password_hash']
         self.totp_secret = data['totp_secret']
@@ -43,11 +56,36 @@ class User(UserMixin):
     def has_totp(self) -> bool:
         return bool(self.totp_secret)
 
+    def get_id(self) -> str:
+        # Stored in the session and remember-me cookies: the user id plus
+        # the server-side session token that load_user() checks.
+        return f'{self.id}:{self.session_token}'
+
 
 @login_manager.user_loader
 def load_user(user_id: str):
-    data = get_user_by_id(int(user_id))
-    return User(data) if data else None
+    uid, _, token = user_id.partition(':')
+    if not (uid.isdigit() and token):
+        return None  # cookie from before server-side sessions, or forged
+    now = datetime.now(timezone.utc).timestamp()
+    if get_auth_session_user(token, now, SESSION_LIFETIME) != int(uid):
+        return None
+    data = get_user_by_id(int(uid))
+    return User(data, token) if data else None
+
+
+def _start_session(data: dict) -> None:
+    """Log the browser in with a new server-side session."""
+    token = secrets.token_urlsafe(32)
+    create_auth_session(token, data['id'], datetime.now(timezone.utc).timestamp(),
+                        SESSION_LIFETIME)
+    login_user(User(data, token), remember=True)
+
+
+def _revoke_other_sessions(user_id: int) -> None:
+    """End every session of the user, then keep this browser logged in."""
+    delete_user_auth_sessions(user_id)
+    _start_session(get_user_by_id(user_id))
 
 
 @login_manager.unauthorized_handler
@@ -87,8 +125,17 @@ def login():
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
+        client = request.remote_addr or 'unknown'
+        if not reserve_login_attempt(client, LOGIN_MAX_ATTEMPTS, LOGIN_ATTEMPT_WINDOW,
+                                     datetime.now(timezone.utc).timestamp()):
+            current_app.logger.warning('Login throttled for client %s', client)
+            return render_template('login.html', next=request.args.get('next', ''),
+                                   error='Too many failed login attempts. Try again later.'), 429
         data = get_user(username)
-        if data and check_password_hash(data['password_hash'], password):
+        password_ok = check_password_hash(
+            data['password_hash'] if data else _DUMMY_PASSWORD_HASH, password)
+        if data and password_ok:
+            release_login_attempt(client)
             if data['totp_secret']:
                 token = secrets.token_urlsafe(32)
                 create_totp_pending(token, data['id'],
@@ -97,7 +144,7 @@ def login():
                 session['totp_next'] = _safe_next_url(request.form.get('next')
                                                       or request.args.get('next'))
                 return redirect(url_for('auth.totp'))
-            login_user(User(data), remember=True)
+            _start_session(data)
             next_url = _safe_next_url(request.form.get('next') or request.args.get('next'))
             return redirect(next_url)
         error = 'Invalid username or password.'
@@ -109,7 +156,7 @@ def _finish_totp_login(token: str, data: dict):
     delete_totp_pending(token)
     session.pop('totp_pending', None)
     next_url = _safe_next_url(session.pop('totp_next', None))
-    login_user(User(data), remember=True)
+    _start_session(data)
     return redirect(next_url)
 
 
@@ -165,6 +212,8 @@ def totp():
 @bp.route('/logout')
 @login_required
 def logout():
+    if current_user.session_token:
+        delete_auth_session(current_user.session_token)
     logout_user()
     return redirect(url_for('auth.login'))
 
@@ -237,6 +286,7 @@ def settings():
                 message = 'Passwords do not match.'
             else:
                 update_password(current_user.id, generate_password_hash(new_pw))
+                _revoke_other_sessions(current_user.id)
                 message = 'Password updated successfully.'
                 success = True
 
@@ -247,6 +297,7 @@ def settings():
                 message = 'Password is incorrect.'
             else:
                 set_totp_secret(current_user.id, None)
+                _revoke_other_sessions(current_user.id)
                 message = 'Two-factor authentication disabled.'
                 success = True
 
@@ -267,6 +318,7 @@ def totp_setup():
         if pyotp.TOTP(secret).verify(request.form.get('code', '').strip()):
             set_totp_secret(current_user.id, secret)
             session.pop('totp_setup_secret', None)
+            _revoke_other_sessions(current_user.id)
             return redirect(url_for('auth.settings'))
         error = 'Invalid code. Check your authenticator app and try again.'
 

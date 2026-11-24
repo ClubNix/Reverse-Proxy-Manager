@@ -386,3 +386,169 @@ def test_users_post_rejected_when_session_has_no_csrf_token(logged_in_client):
 
     assert response.status_code == 400
     assert db.get_user('backdoor') is None
+
+
+# ── Server-side sessions ──────────────────────────────────────────────
+
+def stolen_login(app, client):
+    """A new client replaying the login id stored in `client`'s cookies."""
+    with client.session_transaction() as sess:
+        user_id = sess['_user_id']
+    thief = app.test_client()
+    with thief.session_transaction() as sess:
+        sess['_user_id'] = user_id
+        sess['_fresh'] = False
+    return thief
+
+
+def is_logged_in(client):
+    return client.get('/auth/settings').status_code == 200
+
+
+def test_replayed_login_works_while_session_is_live(app, logged_in_client):
+    assert is_logged_in(stolen_login(app, logged_in_client))
+
+
+def test_logout_revokes_the_session_server_side(app, logged_in_client):
+    thief = stolen_login(app, logged_in_client)
+
+    logged_in_client.get('/auth/logout')
+
+    assert not is_logged_in(logged_in_client)
+    assert not is_logged_in(thief)
+
+
+def test_password_change_revokes_other_sessions(app, logged_in_client):
+    other_device = app.test_client()
+    other_device.post('/auth/login', data={'username': 'admin', 'password': 'secret'})
+    thief = stolen_login(app, logged_in_client)
+
+    logged_in_client.post('/auth/settings', data={
+        'action': 'change_password', 'current_password': 'secret',
+        'new_password': 'new', 'confirm_password': 'new'})
+
+    assert is_logged_in(logged_in_client)
+    assert not is_logged_in(other_device)
+    assert not is_logged_in(thief)
+
+
+def test_enabling_totp_revokes_other_sessions(app, logged_in_client):
+    other_device = app.test_client()
+    other_device.post('/auth/login', data={'username': 'admin', 'password': 'secret'})
+    logged_in_client.get('/auth/settings/totp/setup')
+    with logged_in_client.session_transaction() as sess:
+        secret = sess['totp_setup_secret']
+
+    logged_in_client.post('/auth/settings/totp/setup', data={'code': pyotp.TOTP(secret).now()})
+
+    assert db.get_user('admin')['totp_secret'] == secret
+    assert is_logged_in(logged_in_client)
+    assert not is_logged_in(other_device)
+
+
+def test_sessions_expire_on_the_server(app, client, clock):
+    add_user('admin')
+    client.post('/auth/login', data={'username': 'admin', 'password': 'secret'})
+    assert is_logged_in(client)
+
+    clock.tick(30 * 24 * 3600 + 1)
+
+    assert not is_logged_in(client)
+
+
+@pytest.mark.parametrize('user_id', ['1', '1:', '1:not-a-session'])
+def test_cookie_without_live_session_token_is_rejected(app, client, user_id):
+    add_user('admin')
+    with client.session_transaction() as sess:
+        sess['_user_id'] = user_id
+        sess['_fresh'] = False
+
+    assert not is_logged_in(client)
+
+
+def test_deleting_a_user_revokes_their_sessions(app, logged_in_client):
+    add_user('bob')
+    bob = app.test_client()
+    bob.post('/auth/login', data={'username': 'bob', 'password': 'secret'})
+    assert is_logged_in(bob)
+
+    logged_in_client.post('/auth/users', data={
+        'csrf_token': users_csrf_token(logged_in_client),
+        'action': 'delete', 'user_id': db.get_user('bob')['id']})
+
+    assert not is_logged_in(bob)
+
+
+# ── Password login throttling ─────────────────────────────────────────
+
+def fail_logins(client, count, username='admin'):
+    for _ in range(count):
+        client.post('/auth/login', data={'username': username, 'password': 'wrong'})
+
+
+def test_login_is_throttled_after_too_many_failures(client):
+    from blueprints.auth import LOGIN_MAX_ATTEMPTS
+    add_user('admin')
+    fail_logins(client, LOGIN_MAX_ATTEMPTS)
+
+    # Even the right password is refused without being checked
+    response = client.post('/auth/login', data={'username': 'admin', 'password': 'secret'})
+
+    assert response.status_code == 429
+    assert b'Too many failed login attempts' in response.data
+    assert not is_logged_in(client)
+
+
+def test_unknown_usernames_use_up_the_same_budget(client):
+    from blueprints.auth import LOGIN_MAX_ATTEMPTS
+    add_user('admin')
+    fail_logins(client, LOGIN_MAX_ATTEMPTS, username='nobody')
+
+    response = client.post('/auth/login', data={'username': 'admin', 'password': 'secret'})
+
+    assert response.status_code == 429
+
+
+def test_login_throttle_is_per_client(app, client):
+    from blueprints.auth import LOGIN_MAX_ATTEMPTS
+    add_user('admin')
+    fail_logins(client, LOGIN_MAX_ATTEMPTS)
+
+    owner = app.test_client()
+    owner.post('/auth/login', data={'username': 'admin', 'password': 'secret'},
+               environ_base={'REMOTE_ADDR': '10.0.0.2'})
+
+    assert is_logged_in(owner)
+
+
+def test_login_throttle_resets_after_the_window(client, clock):
+    from blueprints.auth import LOGIN_MAX_ATTEMPTS, LOGIN_ATTEMPT_WINDOW
+    add_user('admin')
+    fail_logins(client, LOGIN_MAX_ATTEMPTS)
+
+    clock.tick(LOGIN_ATTEMPT_WINDOW + 1)
+    client.post('/auth/login', data={'username': 'admin', 'password': 'secret'})
+
+    assert is_logged_in(client)
+
+
+def test_successful_logins_do_not_use_up_the_budget(app, client):
+    from blueprints.auth import LOGIN_MAX_ATTEMPTS
+    add_user('admin')
+    for _ in range(LOGIN_MAX_ATTEMPTS + 2):
+        c = app.test_client()
+        c.post('/auth/login', data={'username': 'admin', 'password': 'secret'})
+        assert is_logged_in(c)
+
+
+def test_unknown_username_still_checks_a_password_hash(client, monkeypatch):
+    import blueprints.auth as auth
+    checked = []
+    real_check = auth.check_password_hash
+    monkeypatch.setattr(auth, 'check_password_hash',
+                        lambda h, pw: checked.append(h) or real_check(h, pw))
+    add_user('admin')
+
+    client.post('/auth/login', data={'username': 'nobody', 'password': 'x'})
+
+    assert checked == [auth._DUMMY_PASSWORD_HASH]

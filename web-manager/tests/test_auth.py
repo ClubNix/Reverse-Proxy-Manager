@@ -8,6 +8,17 @@ from werkzeug.security import generate_password_hash
 import db
 
 
+def csrf(client, url='/auth/settings'):
+    """Load a page like a browser would and return the session's CSRF token."""
+    client.get(url)
+    with client.session_transaction() as sess:
+        return sess['csrf_token']
+
+
+def logout(client):
+    return client.post('/auth/logout', data={'csrf_token': csrf(client)})
+
+
 def add_user(username, password='secret', totp_secret=None):
     db.create_user(username, generate_password_hash(password))
     user = db.get_user(username)
@@ -116,7 +127,7 @@ def test_login_and_logout(client):
     assert response.status_code == 302
     assert client.get('/').status_code == 200
 
-    client.get('/auth/logout')
+    logout(client)
     assert client.get('/').status_code == 302
 
 
@@ -288,7 +299,7 @@ def test_totp_redirect_only_follows_local_next(client, next_url, expected):
 
 def test_change_password(logged_in_client):
     response = logged_in_client.post('/auth/settings', data={
-        'action': 'change_password', 'current_password': 'secret',
+        'csrf_token': csrf(logged_in_client), 'action': 'change_password', 'current_password': 'secret',
         'new_password': 'new', 'confirm_password': 'new'})
 
     assert b'Password updated successfully.' in response.data
@@ -298,7 +309,7 @@ def test_change_password(logged_in_client):
 
 def test_change_password_requires_current_password(logged_in_client):
     response = logged_in_client.post('/auth/settings', data={
-        'action': 'change_password', 'current_password': 'wrong',
+        'csrf_token': csrf(logged_in_client), 'action': 'change_password', 'current_password': 'wrong',
         'new_password': 'new', 'confirm_password': 'new'})
 
     assert b'Current password is incorrect.' in response.data
@@ -361,7 +372,7 @@ def test_users_page_forms_carry_csrf_token(logged_in_client):
     page = logged_in_client.get('/auth/users').data.decode()
 
     field = f'name="csrf_token" value="{token}"'
-    assert page.count(field) == 2  # add-user form and delete-bob form
+    assert page.count(field) == 3  # add-user, delete-bob and logout forms
 
 
 @pytest.mark.parametrize('token', [None, '', 'forged-token'])
@@ -386,3 +397,313 @@ def test_users_post_rejected_when_session_has_no_csrf_token(logged_in_client):
 
     assert response.status_code == 400
     assert db.get_user('backdoor') is None
+
+
+# ── Server-side sessions ──────────────────────────────────────────────
+
+def stolen_login(app, client):
+    """A new client replaying the login id stored in `client`'s cookies."""
+    with client.session_transaction() as sess:
+        user_id = sess['_user_id']
+    thief = app.test_client()
+    with thief.session_transaction() as sess:
+        sess['_user_id'] = user_id
+        sess['_fresh'] = False
+    return thief
+
+
+def is_logged_in(client):
+    return client.get('/auth/settings').status_code == 200
+
+
+def test_replayed_login_works_while_session_is_live(app, logged_in_client):
+    assert is_logged_in(stolen_login(app, logged_in_client))
+
+
+def test_logout_revokes_the_session_server_side(app, logged_in_client):
+    thief = stolen_login(app, logged_in_client)
+
+    logout(logged_in_client)
+
+    assert not is_logged_in(logged_in_client)
+    assert not is_logged_in(thief)
+
+
+def test_password_change_revokes_other_sessions(app, logged_in_client):
+    other_device = app.test_client()
+    other_device.post('/auth/login', data={'username': 'admin', 'password': 'secret'})
+    thief = stolen_login(app, logged_in_client)
+
+    logged_in_client.post('/auth/settings', data={
+        'csrf_token': csrf(logged_in_client), 'action': 'change_password', 'current_password': 'secret',
+        'new_password': 'new', 'confirm_password': 'new'})
+
+    assert is_logged_in(logged_in_client)
+    assert not is_logged_in(other_device)
+    assert not is_logged_in(thief)
+
+
+def test_enabling_totp_revokes_other_sessions(app, logged_in_client):
+    other_device = app.test_client()
+    other_device.post('/auth/login', data={'username': 'admin', 'password': 'secret'})
+    logged_in_client.get('/auth/settings/totp/setup')
+    with logged_in_client.session_transaction() as sess:
+        secret = sess['totp_setup_secret']
+
+    logged_in_client.post('/auth/settings/totp/setup', data={
+        'csrf_token': csrf(logged_in_client, '/auth/settings/totp/setup'),
+        'password': 'secret', 'code': pyotp.TOTP(secret).now()})
+
+    assert db.get_user('admin')['totp_secret'] == secret
+    assert is_logged_in(logged_in_client)
+    assert not is_logged_in(other_device)
+
+
+def test_sessions_expire_on_the_server(app, client, clock):
+    add_user('admin')
+    client.post('/auth/login', data={'username': 'admin', 'password': 'secret'})
+    assert is_logged_in(client)
+
+    clock.tick(30 * 24 * 3600 + 1)
+
+    assert not is_logged_in(client)
+
+
+@pytest.mark.parametrize('user_id', ['1', '1:', '1:not-a-session'])
+def test_cookie_without_live_session_token_is_rejected(app, client, user_id):
+    add_user('admin')
+    with client.session_transaction() as sess:
+        sess['_user_id'] = user_id
+        sess['_fresh'] = False
+
+    assert not is_logged_in(client)
+
+
+def test_deleting_a_user_revokes_their_sessions(app, logged_in_client):
+    add_user('bob')
+    bob = app.test_client()
+    bob.post('/auth/login', data={'username': 'bob', 'password': 'secret'})
+    assert is_logged_in(bob)
+
+    logged_in_client.post('/auth/users', data={
+        'csrf_token': users_csrf_token(logged_in_client),
+        'action': 'delete', 'user_id': db.get_user('bob')['id']})
+
+    assert not is_logged_in(bob)
+
+
+# ── Password login throttling ─────────────────────────────────────────
+
+def fail_logins(client, count, username='admin'):
+    for _ in range(count):
+        client.post('/auth/login', data={'username': username, 'password': 'wrong'})
+
+
+def test_login_is_throttled_after_too_many_failures(client):
+    from blueprints.auth import LOGIN_MAX_ATTEMPTS
+    add_user('admin')
+    fail_logins(client, LOGIN_MAX_ATTEMPTS)
+
+    # Even the right password is refused without being checked
+    response = client.post('/auth/login', data={'username': 'admin', 'password': 'secret'})
+
+    assert response.status_code == 429
+    assert b'Too many failed login attempts' in response.data
+    assert not is_logged_in(client)
+
+
+def test_unknown_usernames_use_up_the_same_budget(client):
+    from blueprints.auth import LOGIN_MAX_ATTEMPTS
+    add_user('admin')
+    fail_logins(client, LOGIN_MAX_ATTEMPTS, username='nobody')
+
+    response = client.post('/auth/login', data={'username': 'admin', 'password': 'secret'})
+
+    assert response.status_code == 429
+
+
+def test_login_throttle_is_per_client(app, client):
+    from blueprints.auth import LOGIN_MAX_ATTEMPTS
+    add_user('admin')
+    fail_logins(client, LOGIN_MAX_ATTEMPTS)
+
+    owner = app.test_client()
+    owner.post('/auth/login', data={'username': 'admin', 'password': 'secret'},
+               environ_base={'REMOTE_ADDR': '10.0.0.2'})
+
+    assert is_logged_in(owner)
+
+
+def test_login_throttle_resets_after_the_window(client, clock):
+    from blueprints.auth import LOGIN_MAX_ATTEMPTS, LOGIN_ATTEMPT_WINDOW
+    add_user('admin')
+    fail_logins(client, LOGIN_MAX_ATTEMPTS)
+
+    clock.tick(LOGIN_ATTEMPT_WINDOW + 1)
+    client.post('/auth/login', data={'username': 'admin', 'password': 'secret'})
+
+    assert is_logged_in(client)
+
+
+def test_successful_logins_do_not_use_up_the_budget(app, client):
+    from blueprints.auth import LOGIN_MAX_ATTEMPTS
+    add_user('admin')
+    for _ in range(LOGIN_MAX_ATTEMPTS + 2):
+        c = app.test_client()
+        c.post('/auth/login', data={'username': 'admin', 'password': 'secret'})
+        assert is_logged_in(c)
+
+
+def test_unknown_username_still_checks_a_password_hash(client, monkeypatch):
+    import blueprints.auth as auth
+    checked = []
+    real_check = auth.check_password_hash
+    monkeypatch.setattr(auth, 'check_password_hash',
+                        lambda h, pw: checked.append(h) or real_check(h, pw))
+    add_user('admin')
+
+    client.post('/auth/login', data={'username': 'nobody', 'password': 'x'})
+
+    assert checked == [auth._DUMMY_PASSWORD_HASH]
+
+
+# ── CSRF on account actions ───────────────────────────────────────────
+
+def test_logout_requires_post(logged_in_client):
+    assert logged_in_client.get('/auth/logout').status_code == 405
+    assert is_logged_in(logged_in_client)
+
+
+@pytest.mark.parametrize('token', [None, 'forged-token'])
+def test_logout_without_valid_csrf_token_is_rejected(logged_in_client, token):
+    csrf(logged_in_client)
+    data = {} if token is None else {'csrf_token': token}
+
+    assert logged_in_client.post('/auth/logout', data=data).status_code == 400
+    assert is_logged_in(logged_in_client)
+
+
+def test_change_password_without_csrf_token_is_rejected(logged_in_client):
+    csrf(logged_in_client)
+    response = logged_in_client.post('/auth/settings', data={
+        'action': 'change_password', 'current_password': 'secret',
+        'new_password': 'new', 'confirm_password': 'new'})
+
+    assert response.status_code == 400
+    from werkzeug.security import check_password_hash
+    assert check_password_hash(db.get_user('admin')['password_hash'], 'secret')
+
+
+def test_disable_totp_without_csrf_token_is_rejected(app, client):
+    add_user('admin', totp_secret=pyotp.random_base32())
+    db.create_auth_session('tok', 1, datetime.now(timezone.utc).timestamp(), 3600)
+    with client.session_transaction() as sess:
+        sess['_user_id'] = '1:tok'
+        sess['csrf_token'] = 'real-token'
+
+    response = client.post('/auth/settings', data={
+        'action': 'disable_totp', 'totp_password': 'secret'})
+
+    assert response.status_code == 400
+    assert db.get_user('admin')['totp_secret'] is not None
+
+
+def start_totp_setup(client):
+    client.get('/auth/settings/totp/setup')
+    with client.session_transaction() as sess:
+        return pyotp.TOTP(sess['totp_setup_secret'])
+
+
+def test_totp_setup_without_csrf_token_is_rejected(logged_in_client):
+    totp = start_totp_setup(logged_in_client)
+
+    response = logged_in_client.post('/auth/settings/totp/setup', data={
+        'password': 'secret', 'code': totp.now()})
+
+    assert response.status_code == 400
+    assert db.get_user('admin')['totp_secret'] is None
+
+
+def test_totp_setup_requires_the_password(logged_in_client):
+    totp = start_totp_setup(logged_in_client)
+
+    response = logged_in_client.post('/auth/settings/totp/setup', data={
+        'csrf_token': csrf(logged_in_client, '/auth/settings/totp/setup'),
+        'password': 'wrong', 'code': totp.now()})
+
+    assert b'Password is incorrect.' in response.data
+    assert db.get_user('admin')['totp_secret'] is None
+
+
+def test_csrf_token_changes_on_login_and_logout(client):
+    add_user('admin')
+    with client.session_transaction() as sess:
+        sess['csrf_token'] = 'left-by-previous-user'
+
+    client.post('/auth/login', data={'username': 'admin', 'password': 'secret'})
+    after_login = csrf(client)
+    assert after_login != 'left-by-previous-user'
+
+    logout(client)
+    with client.session_transaction() as sess:
+        assert sess.get('csrf_token') != after_login
+
+
+# ── TOTP code reuse ───────────────────────────────────────────────────
+
+def test_totp_code_cannot_be_used_twice(app, clock):
+    totp = pyotp.TOTP(pyotp.random_base32())
+    add_user('admin', totp_secret=totp.secret)
+    code = totp.at(clock.current)
+    owner = app.test_client()
+    password_login(owner)
+    owner.post('/auth/totp', data={'code': code})
+    assert is_logged_in(owner)
+
+    # Someone who saw the code tries it within the same 30 s step
+    thief = app.test_client()
+    password_login(thief)
+    response = thief.post('/auth/totp', data={'code': code})
+
+    assert b'already used' in response.data
+    assert not is_logged_in(thief)
+
+    # The next code works
+    clock.tick(30)
+    thief.post('/auth/totp', data={'code': totp.at(clock.current)})
+    assert is_logged_in(thief)
+
+
+def test_enrollment_code_cannot_be_replayed_to_log_in(app, logged_in_client, clock):
+    totp = start_totp_setup(logged_in_client)
+    code = totp.at(clock.current)
+    logged_in_client.post('/auth/settings/totp/setup', data={
+        'csrf_token': csrf(logged_in_client, '/auth/settings/totp/setup'),
+        'password': 'secret', 'code': code})
+    assert db.get_user('admin')['totp_secret'] == totp.secret
+
+    other = app.test_client()
+    password_login(other)
+    response = other.post('/auth/totp', data={'code': code})
+
+    assert b'already used' in response.data
+    assert not is_logged_in(other)
+
+
+def test_totp_last_step_column_is_added_to_old_databases(tmp_path, monkeypatch):
+    import sqlite3
+    path = tmp_path / 'old.db'
+    conn = sqlite3.connect(path)
+    conn.execute('CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, '
+                 'username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, '
+                 'totp_secret TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
+    conn.execute("INSERT INTO users (username, password_hash) VALUES ('admin', 'x')")
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(db, 'DB_PATH', str(path))
+
+    db.init_db()
+    db.init_db()  # running it again is harmless
+
+    assert db.get_user('admin')['totp_last_step'] is None
+    assert db.claim_totp_step(1, 5) and not db.claim_totp_step(1, 5)

@@ -100,6 +100,19 @@ def test_delete_removes_conf(web, fake_nginx):
     assert os.listdir(fake_nginx / 'conf.d') == ['disabled.unavailable']
 
 
+@pytest.mark.parametrize('action', ['view', 'edit', 'logs', 'toggle', 'clone', 'delete'])
+def test_manage_actions_reject_unknown_conf(web, fake_nginx, action):
+    # A config outside conf.d that a traversal name would point at
+    outside = fake_nginx / 'outside.conf'
+    outside.write_text('server { listen 80; }\n')
+
+    response = web.post('/manager/manage', data={'action': action, 'conf': '../outside'})
+
+    assert b'Configuration not found' in response.data
+    assert outside.read_text() == 'server { listen 80; }\n'
+    assert not (fake_nginx / 'outside.conf.disabled').exists()
+
+
 def test_edit_saves_new_content(web, fake_nginx):
     create(web)
 
@@ -205,3 +218,37 @@ def test_anonymous_post_still_redirects_to_login(client):
     response = client.post('/manager/manage', data={'action': 'delete', 'conf': 'app.example.com'})
 
     assert response.status_code == 302
+
+
+# ── Create form validation ────────────────────────────────────────────
+
+@pytest.mark.parametrize('domain', [
+    'app.example.com\nserver_name evil.com', 'app example.com', 'app.example.com;',
+    '-app.example.com', 'app..example.com', 'a' * 64 + '.com', 'app.example.com"',
+])
+def test_create_rejects_invalid_domain(web, fake_nginx, domain):
+    response = create(web, domain=domain)
+
+    assert b'Invalid domain name' in response.data
+    assert os.listdir(fake_nginx / 'conf.d') == []
+
+
+@pytest.mark.parametrize('domain', ['localhost', 'app-1.example.com', '*.example.com'])
+def test_create_accepts_valid_domain(web, fake_nginx, domain):
+    response = create(web, domain=domain)
+
+    assert b'created successfully' in response.data
+
+
+@pytest.mark.parametrize('field, value, message', [
+    ('description', 'My app\n    } server { listen 80;', b'cannot contain'),
+    ('allow_origin', '*" always;\n    add_header X-Evil "1', b'cannot contain'),
+    ('allow_origin', 'https://a.example\\', b'cannot contain'),
+    ('service_type', 'http://10.0.0.6;#', b'Invalid service type'),
+])
+def test_create_rejects_text_that_would_inject_nginx_directives(web, fake_nginx,
+                                                                field, value, message):
+    response = web.post('/manager/create', data={**CREATE_FORM, field: value})
+
+    assert message in response.data
+    assert os.listdir(fake_nginx / 'conf.d') == []

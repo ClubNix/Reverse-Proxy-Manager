@@ -17,7 +17,10 @@ from db import (user_count, get_user, get_user_by_id, get_all_users,
                 create_user, create_first_user, update_password,
                 set_totp_secret, delete_user,
                 create_totp_pending, get_totp_pending, set_totp_pending_first_code,
-                delete_totp_pending, reserve_totp_attempt, release_totp_attempt)
+                delete_totp_pending, reserve_totp_attempt, release_totp_attempt,
+                create_auth_session, get_auth_session_user, delete_auth_session,
+                delete_user_auth_sessions, reserve_login_attempt, release_login_attempt,
+                claim_totp_step)
 
 bp = Blueprint('auth', __name__, url_prefix='/auth')
 login_manager = LoginManager()
@@ -30,11 +33,22 @@ TOTP_PENDING_TTL = 300
 # so someone else's failed guesses cannot lock the account owner out.
 TOTP_MAX_ATTEMPTS = 5
 TOTP_ATTEMPT_WINDOW = 900
+# Seconds a login stays valid on the server, whatever the cookies say.
+# Matches REMEMBER_COOKIE_DURATION (30 days).
+SESSION_LIFETIME = 30 * 24 * 3600
+# Failed password logins allowed per client IP and per window. Counted per
+# client rather than per account, so nobody can lock someone else out.
+LOGIN_MAX_ATTEMPTS = 10
+LOGIN_ATTEMPT_WINDOW = 900
+# Checked when the username does not exist, so that the response takes as
+# long as a wrong password and does not reveal which usernames exist.
+_DUMMY_PASSWORD_HASH = generate_password_hash(secrets.token_urlsafe(16))
 
 
 class User(UserMixin):
-    def __init__(self, data: dict):
+    def __init__(self, data: dict, session_token: str | None = None):
         self.id = data['id']
+        self.session_token = session_token
         self.username = data['username']
         self.password_hash = data['password_hash']
         self.totp_secret = data['totp_secret']
@@ -43,11 +57,39 @@ class User(UserMixin):
     def has_totp(self) -> bool:
         return bool(self.totp_secret)
 
+    def get_id(self) -> str:
+        # Stored in the session and remember-me cookies: the user id plus
+        # the server-side session token that load_user() checks.
+        return f'{self.id}:{self.session_token}'
+
 
 @login_manager.user_loader
 def load_user(user_id: str):
-    data = get_user_by_id(int(user_id))
-    return User(data) if data else None
+    uid, _, token = user_id.partition(':')
+    if not (uid.isdigit() and token):
+        return None  # cookie from before server-side sessions, or forged
+    now = datetime.now(timezone.utc).timestamp()
+    if get_auth_session_user(token, now, SESSION_LIFETIME) != int(uid):
+        return None
+    data = get_user_by_id(int(uid))
+    return User(data, token) if data else None
+
+
+def _start_session(data: dict) -> None:
+    """Log the browser in with a new server-side session."""
+    # A new login gets a new CSRF token, so one left in a shared browser by a
+    # previous session is useless.
+    session.pop('csrf_token', None)
+    token = secrets.token_urlsafe(32)
+    create_auth_session(token, data['id'], datetime.now(timezone.utc).timestamp(),
+                        SESSION_LIFETIME)
+    login_user(User(data, token), remember=True)
+
+
+def _revoke_other_sessions(user_id: int) -> None:
+    """End every session of the user, then keep this browser logged in."""
+    delete_user_auth_sessions(user_id)
+    _start_session(get_user_by_id(user_id))
 
 
 @login_manager.unauthorized_handler
@@ -87,8 +129,17 @@ def login():
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
+        client = request.remote_addr or 'unknown'
+        if not reserve_login_attempt(client, LOGIN_MAX_ATTEMPTS, LOGIN_ATTEMPT_WINDOW,
+                                     datetime.now(timezone.utc).timestamp()):
+            current_app.logger.warning('Login throttled for client %s', client)
+            return render_template('login.html', next=request.args.get('next', ''),
+                                   error='Too many failed login attempts. Try again later.'), 429
         data = get_user(username)
-        if data and check_password_hash(data['password_hash'], password):
+        password_ok = check_password_hash(
+            data['password_hash'] if data else _DUMMY_PASSWORD_HASH, password)
+        if data and password_ok:
+            release_login_attempt(client)
             if data['totp_secret']:
                 token = secrets.token_urlsafe(32)
                 create_totp_pending(token, data['id'],
@@ -97,7 +148,7 @@ def login():
                 session['totp_next'] = _safe_next_url(request.form.get('next')
                                                       or request.args.get('next'))
                 return redirect(url_for('auth.totp'))
-            login_user(User(data), remember=True)
+            _start_session(data)
             next_url = _safe_next_url(request.form.get('next') or request.args.get('next'))
             return redirect(next_url)
         error = 'Invalid username or password.'
@@ -109,7 +160,7 @@ def _finish_totp_login(token: str, data: dict):
     delete_totp_pending(token)
     session.pop('totp_pending', None)
     next_url = _safe_next_url(session.pop('totp_next', None))
-    login_user(User(data), remember=True)
+    _start_session(data)
     return redirect(next_url)
 
 
@@ -135,9 +186,12 @@ def totp():
             if reserve_totp_attempt(data['id'], TOTP_MAX_ATTEMPTS, TOTP_ATTEMPT_WINDOW,
                                     when.timestamp()):
                 if otp.verify(code, for_time=when):
-                    release_totp_attempt(data['id'])
-                    return _finish_totp_login(token, data)
-                error = 'Invalid code. Please try again.'
+                    if claim_totp_step(data['id'], step):
+                        release_totp_attempt(data['id'])
+                        return _finish_totp_login(token, data)
+                    error = 'This code was already used. Wait for a new code, then enter it.'
+                else:
+                    error = 'Invalid code. Please try again.'
             # The account's budget is used up: this login needs two codes from
             # two different time steps. The first is recorded without saying
             # whether it was right; the second is checked once, together with it.
@@ -151,7 +205,8 @@ def totp():
                         and step <= pending['first_step']):
                     error = 'Wait for your authenticator to show a new code, then enter it.'
                 elif pending and delete_totp_pending(token):
-                    if pending['first_ok'] and otp.verify(code, for_time=when):
+                    if (pending['first_ok'] and otp.verify(code, for_time=when)
+                            and claim_totp_step(data['id'], step)):
                         return _finish_totp_login(token, data)
                     session.pop('totp_pending', None)
                     error = 'Invalid code. Please sign in again.'
@@ -162,10 +217,15 @@ def totp():
     return render_template('totp.html', error=error)
 
 
-@bp.route('/logout')
+@bp.route('/logout', methods=['POST'])
 @login_required
 def logout():
+    # POST only, with the CSRF token checked in check_csrf_token(), so that
+    # another site cannot end the session.
+    if current_user.session_token:
+        delete_auth_session(current_user.session_token)
     logout_user()
+    session.pop('csrf_token', None)
     return redirect(url_for('auth.login'))
 
 
@@ -237,6 +297,7 @@ def settings():
                 message = 'Passwords do not match.'
             else:
                 update_password(current_user.id, generate_password_hash(new_pw))
+                _revoke_other_sessions(current_user.id)
                 message = 'Password updated successfully.'
                 success = True
 
@@ -247,6 +308,7 @@ def settings():
                 message = 'Password is incorrect.'
             else:
                 set_totp_secret(current_user.id, None)
+                _revoke_other_sessions(current_user.id)
                 message = 'Two-factor authentication disabled.'
                 success = True
 
@@ -264,11 +326,20 @@ def totp_setup():
 
     error = None
     if request.method == 'POST':
-        if pyotp.TOTP(secret).verify(request.form.get('code', '').strip()):
+        otp = pyotp.TOTP(secret)
+        when = datetime.now(timezone.utc)
+        data = get_user_by_id(current_user.id)
+        if not check_password_hash(data['password_hash'], request.form.get('password', '')):
+            error = 'Password is incorrect.'
+        elif otp.verify(request.form.get('code', '').strip(), for_time=when):
             set_totp_secret(current_user.id, secret)
+            # The enrollment code cannot be replayed to log in.
+            claim_totp_step(current_user.id, otp.timecode(when))
             session.pop('totp_setup_secret', None)
+            _revoke_other_sessions(current_user.id)
             return redirect(url_for('auth.settings'))
-        error = 'Invalid code. Check your authenticator app and try again.'
+        else:
+            error = 'Invalid code. Check your authenticator app and try again.'
 
     otp_uri = pyotp.TOTP(secret).provisioning_uri(
         name=current_user.username,
@@ -305,8 +376,20 @@ def get_csrf_token() -> str:
     return token
 
 
+@bp.app_context_processor
+def inject_csrf_token() -> dict:
+    # Available in every template, e.g. the logout form in base.html.
+    return {'csrf_token': get_csrf_token}
+
+
+@bp.before_request
 def check_csrf_token() -> None:
-    """Abort with 400 unless the form carries the session's CSRF token."""
+    """Abort with 400 unless a logged-in POST carries the session's CSRF token.
+
+    Anonymous forms (login, TOTP, setup) have no session to protect yet.
+    """
+    if request.method in ('GET', 'HEAD', 'OPTIONS') or not current_user.is_authenticated:
+        return
     expected = session.get('csrf_token')
     submitted = request.form.get('csrf_token', '')
     if not expected or not hmac.compare_digest(expected.encode(),
@@ -323,7 +406,6 @@ def users():
     success = False
 
     if request.method == 'POST':
-        check_csrf_token()
         action = request.form.get('action')
 
         if action == 'add':
@@ -351,5 +433,4 @@ def users():
                     success = True
 
     return render_template('users.html', users=get_all_users(),
-                           message=message, success=success,
-                           csrf_token=get_csrf_token())
+                           message=message, success=success)

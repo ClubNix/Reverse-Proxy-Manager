@@ -24,6 +24,7 @@
             </div>
         </div>
         <form method="POST" class="settings-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="action" value="change_password">
             <div class="field">
                 <label for="current_password">Current password</label>
@@ -62,6 +63,7 @@
             <i class="bi bi-check-circle"></i> TOTP is enabled on your account
         </div>
         <form method="POST" class="settings-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="action" value="disable_totp">
             <div class="field">
                 <label for="totp_password">Confirm your password to disable</label>

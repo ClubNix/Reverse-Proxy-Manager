@@ -59,10 +59,12 @@
                     </li>
                     <li><hr class="dropdown-divider"></li>
                     <li>
-                        <a class="dropdown-item dropdown-item--danger"
-                           href="{{ url_for('auth.logout') }}">
-                            <i class="bi bi-box-arrow-right"></i> Logout
-                        </a>
+                        <form method="POST" action="{{ url_for('auth.logout') }}" class="m-0">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="dropdown-item dropdown-item--danger">
+                                <i class="bi bi-box-arrow-right"></i> Logout
+                            </button>
+                        </form>
                     </li>
                 </ul>
             </div>

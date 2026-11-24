@@ -44,6 +44,11 @@ def init_db() -> None:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        # Last TOTP time step accepted for each account, so a code cannot be
+        # used twice (added after the users table, hence the migration).
+        columns = {row['name'] for row in conn.execute('PRAGMA table_info(users)')}
+        if 'totp_last_step' not in columns:
+            conn.execute('ALTER TABLE users ADD COLUMN totp_last_step INTEGER')
         # Password-verified logins waiting for their TOTP code. Kept server
         # side so that replaying the session cookie cannot rewind their state.
         conn.execute('''
@@ -59,6 +64,23 @@ def init_db() -> None:
         conn.execute('''
             CREATE TABLE IF NOT EXISTS totp_attempts (
                 user_id INTEGER PRIMARY KEY,
+                window_start REAL NOT NULL,
+                attempts INTEGER NOT NULL
+            )
+        ''')
+        # Logged-in sessions. The session and remember-me cookies only carry
+        # a token pointing here, so a login can be revoked server side.
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS auth_sessions (
+                token TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                created_at REAL NOT NULL
+            )
+        ''')
+        # Per-client budget of failed password logins.
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS login_attempts (
+                client TEXT PRIMARY KEY,
                 window_start REAL NOT NULL,
                 attempts INTEGER NOT NULL
             )
@@ -116,12 +138,23 @@ def update_password(user_id: int, password_hash: str) -> None:
 
 def set_totp_secret(user_id: int, secret: str | None) -> None:
     with _connect() as conn:
-        conn.execute('UPDATE users SET totp_secret = ? WHERE id = ?', (secret, user_id))
+        conn.execute('UPDATE users SET totp_secret = ?, totp_last_step = NULL WHERE id = ?',
+                     (secret, user_id))
+
+
+def claim_totp_step(user_id: int, step: int) -> bool:
+    """Record a TOTP time step as used; False if it (or a later one) already was."""
+    with _connect() as conn:
+        cur = conn.execute('UPDATE users SET totp_last_step = ? WHERE id = ? '
+                           'AND (totp_last_step IS NULL OR totp_last_step < ?)',
+                           (step, user_id, step))
+        return cur.rowcount == 1
 
 
 def delete_user(user_id: int) -> None:
     with _connect() as conn:
         conn.execute('DELETE FROM users WHERE id = ?', (user_id,))
+        conn.execute('DELETE FROM auth_sessions WHERE user_id = ?', (user_id,))
 
 
 # ── TOTP login state ──────────────────────────────────────────────────
@@ -177,3 +210,56 @@ def release_totp_attempt(user_id: int) -> None:
     with _connect() as conn:
         conn.execute('UPDATE totp_attempts SET attempts = attempts - 1 '
                      'WHERE user_id = ? AND attempts > 0', (user_id,))
+
+
+# ── Logged-in sessions ────────────────────────────────────────────────
+
+def create_auth_session(token: str, user_id: int, now: float, ttl: float) -> None:
+    with _connect() as conn:
+        conn.execute('DELETE FROM auth_sessions WHERE created_at <= ?', (now - ttl,))
+        conn.execute('INSERT INTO auth_sessions (token, user_id, created_at) VALUES (?, ?, ?)',
+                     (token, user_id, now))
+
+
+def get_auth_session_user(token: str, now: float, ttl: float) -> int | None:
+    """Return the user id of a live session, or None if revoked or expired."""
+    with _connect() as conn:
+        row = conn.execute('SELECT user_id FROM auth_sessions WHERE token = ? AND created_at > ?',
+                           (token, now - ttl)).fetchone()
+    return row['user_id'] if row else None
+
+
+def delete_auth_session(token: str) -> None:
+    with _connect() as conn:
+        conn.execute('DELETE FROM auth_sessions WHERE token = ?', (token,))
+
+
+def delete_user_auth_sessions(user_id: int) -> None:
+    with _connect() as conn:
+        conn.execute('DELETE FROM auth_sessions WHERE user_id = ?', (user_id,))
+
+
+# ── Password login throttling ─────────────────────────────────────────
+
+def reserve_login_attempt(client: str, limit: int, window: float, now: float) -> bool:
+    """Atomically take one password attempt from the client's budget."""
+    with _connect() as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        row = conn.execute('SELECT window_start, attempts FROM login_attempts WHERE client = ?',
+                           (client,)).fetchone()
+        if row is None or row['window_start'] <= now - window:
+            conn.execute('INSERT OR REPLACE INTO login_attempts (client, window_start, attempts) '
+                         'VALUES (?, ?, 1)', (client, now))
+            return True
+        if row['attempts'] < limit:
+            conn.execute('UPDATE login_attempts SET attempts = attempts + 1 WHERE client = ?',
+                         (client,))
+            return True
+        return False
+
+
+def release_login_attempt(client: str) -> None:
+    """Give back an attempt that turned out to be a correct password."""
+    with _connect() as conn:
+        conn.execute('UPDATE login_attempts SET attempts = attempts - 1 '
+                     'WHERE client = ? AND attempts > 0', (client,))

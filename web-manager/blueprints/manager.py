@@ -135,6 +135,26 @@ class ReverseProxyManager:
 
     # ── Config file helpers ───────────────────────────────────────────
 
+    # One DNS label: letters, digits and inner hyphens, at most 63 characters.
+    _DNS_LABEL = r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?'
+    _DOMAIN_PATTERN = re.compile(rf'(?:\*\.)?(?:{_DNS_LABEL}\.)*{_DNS_LABEL}')
+
+    @classmethod
+    def is_valid_domain(cls, domain: str) -> bool:
+        """True if `domain` is a hostname, optionally with a leading '*.' wildcard.
+
+        The domain is written into the nginx server_name line, file names and
+        the openssl config, so anything else (spaces, newlines, ';', quotes)
+        could inject directives there.
+        """
+        return len(domain) <= 253 and cls._DOMAIN_PATTERN.fullmatch(domain) is not None
+
+    @staticmethod
+    def is_config_text(value: str) -> bool:
+        """True if `value` can go inside a quoted value or comment of a generated
+        nginx config without ending it: no control characters, quotes or backslashes."""
+        return not any(ord(c) < 0x20 or ord(c) == 0x7f or c in '"\\' for c in value)
+
     @staticmethod
     def is_safe_name(name: str) -> bool:
         """True if `name` can be used as a single path component.
@@ -568,6 +588,11 @@ def manage() -> str | flask.Response:
 
         action = request.form['action']
         conf_name = request.form['conf']
+        # conf_name comes from the request and is used to build file paths:
+        # only accept names of configurations that actually exist in conf.d.
+        if conf_name not in conf_list:
+            return render_template('manage.html', conf_list=conf_list, conf_status=conf_status,
+                                   message='Configuration not found', success=False)
 
         if action == 'view':
             conf_infos = handler.get_conf_infos(conf_name)
@@ -630,8 +655,15 @@ def create() -> str:
             return render_template('create.html', message='Domain and server address are required', success=False)
         if allow_origin == '':
             allow_origin = '*'
-        if not handler.is_safe_name(domain):
+        if not (handler.is_safe_name(domain) and handler.is_valid_domain(domain)):
             return render_template('create.html', message='Invalid domain name', success=False)
+        if service_type not in ('http', 'https'):
+            return render_template('create.html', message='Invalid service type', success=False)
+        if not (handler.is_config_text(description) and handler.is_config_text(allow_origin)):
+            return render_template('create.html',
+                                   message='Description and Allow-Origin cannot contain '
+                                           'quotes, backslashes or line breaks',
+                                   success=False)
 
         if domain in handler.get_conf_list():
             return render_template('create.html', message='Domain already exists', success=False)

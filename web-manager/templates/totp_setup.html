@@ -40,6 +40,12 @@
     </div>
 
     <form method="POST" class="totp-setup-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="field">
+            <label for="password">Current password</label>
+            <input type="password" id="password" name="password"
+                   autocomplete="current-password" required>
+        </div>
         <div class="field">
             <label for="code">Verification code</label>
             <input type="text" id="code" name="code"
